@@ -1,0 +1,8 @@
+fastapi>=0.136.1
+uvicorn[standard]>=0.46.0
+uvloop; sys_platform != 'win32'
+pydantic>=2.13.3
+pydantic-settings>=2.14.0
+httpx>=0.28.1
+httptools>=0.7.1
+pytest>=9.0.3
