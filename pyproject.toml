@@ -1,0 +1,20 @@
+[project]
+name = "track-my-assets"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "aiomqtt>=2.5.1",
+    "alembic>=1.18.4",
+    "asyncpg>=0.31.0",
+    "fastapi>=0.136.1",
+    "httptools>=0.7.1",
+    "httpx>=0.28.1",
+    "paho-mqtt>=2.1.0",
+    "pydantic>=2.13.3",
+    "pydantic-settings>=2.14.0",
+    "pytest>=9.0.3",
+    "redis>=8.0.0",
+    "sqlalchemy[asyncio]>=2.0.44",
+    "uvicorn[standard]>=0.46.0",
+    "uvloop>=0.22.1 ; sys_platform != 'win32'",
+]

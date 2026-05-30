@@ -11,13 +11,23 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list[str] = Field(default_factory=lambda: ["*"])
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
+    CACHE_EXPIRY: int = 3600
 
     # ---- Database ----------------------------------------------------------
-    DATABASE_URL: str = ""
+    DB_NAME: str = "postgres"
+    DB_USER: str = "postgres"
+    DB_PASSWORD: str = "dev_password"
+    DB_HOST: str = "localhost"
+    DB_PORT: int = 5432
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
+    REDIS_PASSWORD: str = "dev_password"
 
-    # ---- External services -------------------------------------------------
-    EXTERNAL_API_URL: str = ""
-    EXTERNAL_API_KEY: str = ""
+    # ---- MQTT --------------------------------------------------------------
+    MQTT_HOST: str = Field(default="localhost")
+    MQTT_PORT: int = Field(default=8883)
+    MQTT_USER: str | None = Field(default="devuser")
+    MQTT_PASSWORD: str | None = Field(default="devpassword")
 
 
 settings = Settings()

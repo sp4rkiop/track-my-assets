@@ -4,9 +4,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.v1 import demo
 from core.config import settings
+from core.database import PostgreSQLDatabase
 from core.middleware import RequestIdMiddleware
+from core.mqtt_client import MQTTService
+from core.redis_cache import RedisCache
 
 
 async def scheduled_data_fetch() -> None:
@@ -23,6 +25,10 @@ async def _scheduler() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # --- startup ---
+    await RedisCache.initialize()
+    await PostgreSQLDatabase.initialize()
+    await MQTTService.initialize()
+    await MQTTService.start_listening()
     task = asyncio.create_task(_scheduler())
     yield
     # --- shutdown ---
@@ -31,6 +37,9 @@ async def lifespan(app: FastAPI):
         await task
     except asyncio.CancelledError:
         pass
+    await MQTTService.close_connection()
+    await PostgreSQLDatabase.close_all_connections()
+    await RedisCache.close_connection()
 
 
 app = FastAPI(
@@ -50,7 +59,7 @@ app.add_middleware(
 )
 app.add_middleware(RequestIdMiddleware)
 
-app.include_router(demo.router, prefix="/api/v1/demo", tags=["demo"])
+# app.include_router(demo.router, prefix="/api/v1/demo", tags=["demo"])
 
 
 @app.get("/health")
