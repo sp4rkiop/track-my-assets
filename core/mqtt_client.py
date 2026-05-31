@@ -6,6 +6,7 @@ import math
 import ssl
 import aiomqtt
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from core.config import settings
 from core.database import PostgreSQLDatabase
 from models.tracker import Device, Telemetry
@@ -99,7 +100,7 @@ class MQTTService:
             logger.info(f"Incoming telemetry from {imei}: {payload}")
 
             async with PostgreSQLDatabase.get_session() as db:
-                # 1. Find or Create Device
+                # 1. Find or create device
                 result = await db.execute(select(Device).where(Device.imei == imei))
                 device = result.scalar_one_or_none()
 
@@ -107,18 +108,17 @@ class MQTTService:
                     logger.info(f"New device detected. Registering IMEI: {imei}")
                     device = Device(name=f"Tracker-{imei[-4:]}", imei=imei)
                     db.add(device)
-                    await db.flush()  # Flush to generate the device.id UUID immediately
+                    await db.flush()
 
-                # 2. Parse Timestamp (Fallback to server time if device has no RTC lock)
+                # 2. Parse timestamp — fall back to server time if no RTC lock
                 device_ts_str = payload.get("ts")
-                if device_ts_str:
-                    # Replace Z with +00:00 for Python ISO format compatibility
-                    device_ts = datetime.fromisoformat(
-                        device_ts_str.replace("Z", "+00:00")
-                    )
-                else:
-                    device_ts = datetime.now(timezone.utc)
+                device_ts = (
+                    datetime.fromisoformat(device_ts_str.replace("Z", "+00:00"))
+                    if device_ts_str
+                    else datetime.now(timezone.utc)
+                )
 
+                # 3. Compute IMU magnitude
                 ax, ay, az = (
                     payload.get("accel_x"),
                     payload.get("accel_y"),
@@ -130,38 +130,56 @@ class MQTTService:
                     else None
                 )
 
-                # 3. Create Telemetry Record
-                telemetry = Telemetry(
-                    device_id=device.id,
-                    device_ts=device_ts,
-                    event_type=payload.get("event", "PERIODIC"),
-                    latitude=payload.get("lat"),
-                    longitude=payload.get("lon"),
-                    altitude_m=payload.get("alt"),
-                    speed_kmh=payload.get("speed"),
-                    battery_voltage=payload.get("bat_v"),
-                    battery_pct=payload.get("bat_pct"),
-                    cpsi_raw=payload.get("cpsi"),
-                    gps_ttff=payload.get("ttff"),
-                    accel_x=ax,
-                    accel_y=ay,
-                    accel_z=az,
-                    accel_magnitude=magnitude,
-                    is_moving=magnitude > 1.2
-                    if magnitude is not None
-                    else None,  # tune threshold
+                # 4. Upsert telemetry — ON CONFLICT DO NOTHING handles QoS-1 duplicates.
+                #    The conflict target is the composite PK (device_id, device_ts).
+                #    A duplicate means the broker re-delivered an already-stored message;
+                #    silently skipping is correct — the data is already there.
+                stmt = (
+                    insert(Telemetry)
+                    .values(
+                        device_id=device.id,
+                        device_ts=device_ts,
+                        event_type=payload.get("event", "PERIODIC"),
+                        latitude=payload.get("lat"),
+                        longitude=payload.get("lon"),
+                        altitude_m=payload.get("alt"),
+                        speed_kmh=payload.get("speed"),
+                        heading_deg=payload.get("heading"),
+                        accuracy_m=payload.get("accuracy"),
+                        hdop=payload.get("hdop"),
+                        fix_quality=payload.get("fix_quality"),
+                        gps_ttff=payload.get("ttff"),
+                        rssi=payload.get("rssi"),
+                        rsrp=payload.get("rsrp"),
+                        rsrq=payload.get("rsrq"),
+                        cell_id=payload.get("cell_id"),
+                        cpsi_raw=payload.get("cpsi"),
+                        battery_voltage=payload.get("bat_v"),
+                        battery_pct=payload.get("bat_pct"),
+                        accel_x=ax,
+                        accel_y=ay,
+                        accel_z=az,
+                        accel_magnitude=magnitude,
+                        is_moving=magnitude > 1.2 if magnitude is not None else None,
+                    )
+                    .on_conflict_do_nothing(
+                        index_elements=[
+                            "device_id",
+                            "device_ts",
+                        ]  # composite PK columns
+                    )
                 )
-                db.add(telemetry)
+                await db.execute(stmt)
 
-                # 4. Update Device Quick-Status
+                # 5. Update device quick-status — always refresh even on duplicate telemetry
                 device.last_seen = datetime.now(timezone.utc)
 
-                # Commit is handled automatically by the get_session context manager
-
         except json.JSONDecodeError:
-            logger.error("Failed to decode MQTT payload. Invalid JSON.")
+            logger.error(
+                f"Failed to decode MQTT payload from topic {message.topic}. Invalid JSON."
+            )
         except Exception as e:
-            logger.error(f"Error processing MQTT message: {e}")
+            logger.error(f"Error processing MQTT message: {e}", exc_info=True)
 
     @classmethod
     async def close_connection(cls):

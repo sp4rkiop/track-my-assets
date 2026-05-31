@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.v1 import telemetry
+from api.v1 import devices, ota, telemetry
 from core.config import settings
 from core.database import PostgreSQLDatabase
 from core.middleware import RequestIdMiddleware
@@ -60,7 +60,9 @@ app.add_middleware(
 )
 app.add_middleware(RequestIdMiddleware)
 
-app.include_router(telemetry.router, prefix="/api/v1/telemetry", tags=["telemetry"])
+app.include_router(devices.router, prefix="/api/v1/devices", tags=["Devices"])
+app.include_router(telemetry.router, prefix="/api/v1/telemetry", tags=["Telemetry"])
+app.include_router(ota.router, prefix="/api/v1/ota", tags=["OTA Updates"])
 
 
 @app.get("/health")

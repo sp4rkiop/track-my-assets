@@ -1,47 +1,33 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from core.database import PostgreSQLDatabase
-from models.tracker import Device, Telemetry
+from core.deps import get_db
+from schemas.tracker import TelemetryRead
+from services.device_service import DeviceService
+from services.telemetry_service import TelemetryService
 
-router = APIRouter(prefix="/telemetry", tags=["Telemetry"])
-
-
-# Dependency to get DB session
-async def get_db():
-    async with PostgreSQLDatabase.get_session() as session:
-        yield session
+router = APIRouter()
 
 
-@router.get("/{imei}/latest")
+@router.get("/{imei}/latest", response_model=TelemetryRead)
 async def get_latest_telemetry(imei: str, db: AsyncSession = Depends(get_db)):
-    """Fetches the most recent coordinates for a given device."""
-
-    # 1. Lookup Device
-    device_result = await db.execute(select(Device).where(Device.imei == imei))
-    device = device_result.scalar_one_or_none()
+    device = await DeviceService.get_by_imei(db, imei)
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
-    # 2. Lookup latest telemetry point
-    tel_result = await db.execute(
-        select(Telemetry)
-        .where(Telemetry.device_id == device.id)
-        .order_by(Telemetry.device_ts.desc())
-        .limit(1)
-    )
-    latest = tel_result.scalar_one_or_none()
-
+    latest = await TelemetryService.get_latest_by_device_id(db, device.id)
     if not latest:
-        return {"message": "No telemetry data found for this device yet."}
+        raise HTTPException(status_code=404, detail="No telemetry data found")
 
-    return {
-        "device": device.name,
-        "last_seen": device.last_seen,
-        "coordinates": {
-            "lat": float(latest.latitude) if latest.latitude else None,
-            "lon": float(latest.longitude) if latest.longitude else None,
-        },
-        "event": latest.event_type,
-        "battery": latest.battery_pct,
-    }
+    return TelemetryRead.from_orm_model(latest)
+
+
+@router.get("/{imei}/history", response_model=list[TelemetryRead])
+async def get_telemetry_history(
+    imei: str, limit: int = 50, db: AsyncSession = Depends(get_db)
+):
+    device = await DeviceService.get_by_imei(db, imei)
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    history = await TelemetryService.get_history(db, device.id, limit)
+    return [TelemetryRead.from_orm_model(h) for h in history]

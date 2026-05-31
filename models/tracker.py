@@ -53,16 +53,11 @@ class Telemetry(Base):
     __tablename__ = "telemetry"
     __table_args__ = (
         # TimescaleDB requires device_ts in every unique constraint / PK
-        PrimaryKeyConstraint("id", "device_ts"),
-        # Dashboard: "latest N points for device X in time range"
-        Index("ix_telemetry_device_time", "device_id", "device_ts"),
+        PrimaryKeyConstraint("device_id", "device_ts"),
         # Alert queries: "all BUMP events in last hour"
         Index("ix_telemetry_event_time", "event_type", "device_ts"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), nullable=False, default=uuid.uuid4
-    )
     device_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("devices.id", ondelete="CASCADE"),
