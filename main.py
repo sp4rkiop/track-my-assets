@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.v1 import telemetry
 from core.config import settings
 from core.database import PostgreSQLDatabase
 from core.middleware import RequestIdMiddleware
@@ -59,7 +60,7 @@ app.add_middleware(
 )
 app.add_middleware(RequestIdMiddleware)
 
-# app.include_router(demo.router, prefix="/api/v1/demo", tags=["demo"])
+app.include_router(telemetry.router, prefix="/api/v1/telemetry", tags=["telemetry"])
 
 
 @app.get("/health")

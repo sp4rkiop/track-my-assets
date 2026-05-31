@@ -1,11 +1,14 @@
 import asyncio
+from datetime import datetime, timezone
 import logging
 import json
+import math
 import ssl
 import aiomqtt
+from sqlalchemy import select
 from core.config import settings
 from core.database import PostgreSQLDatabase
-from models.tracker import Telemetry
+from models.tracker import Device, Telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +57,7 @@ class MQTTService:
                 try:
                     async with client:
                         logger.info("Connected securely to Mosquitto Broker via MQTTS.")
-                        await client.subscribe("trackers/+/location")
+                        await client.subscribe("trackers/+/location", qos=1)
 
                         async for message in client.messages:
                             # Process messages asynchronously
@@ -76,13 +79,12 @@ class MQTTService:
 
     @classmethod
     async def _process_message(cls, message: aiomqtt.Message):
-        """Handles incoming payloads and writes them to PostgreSQL."""
+        """Handles incoming payloads, maps IMEI to Device, and writes to TimescaleDB."""
         try:
-            # We must verify the payload is not None before decoding
             if message.payload is None:
                 return
 
-            # payload can be bytes, bytearray, etc. decode it.
+            # Decode payload
             raw_payload = (
                 message.payload.decode()
                 if isinstance(message.payload, (bytes, bytearray))
@@ -90,22 +92,71 @@ class MQTTService:
             )
             payload = json.loads(raw_payload)
 
-            # message.topic can be accessed as a string
+            # Extract IMEI from topic: e.g., trackers/123456789012345/location
             topic = str(message.topic)
-            device_id = topic.split("/")[1]
+            imei = topic.split("/")[1]
 
-            logger.info(f"Incoming telemetry from {device_id}: {payload}")
+            logger.info(f"Incoming telemetry from {imei}: {payload}")
 
             async with PostgreSQLDatabase.get_session() as db:
+                # 1. Find or Create Device
+                result = await db.execute(select(Device).where(Device.imei == imei))
+                device = result.scalar_one_or_none()
+
+                if not device:
+                    logger.info(f"New device detected. Registering IMEI: {imei}")
+                    device = Device(name=f"Tracker-{imei[-4:]}", imei=imei)
+                    db.add(device)
+                    await db.flush()  # Flush to generate the device.id UUID immediately
+
+                # 2. Parse Timestamp (Fallback to server time if device has no RTC lock)
+                device_ts_str = payload.get("ts")
+                if device_ts_str:
+                    # Replace Z with +00:00 for Python ISO format compatibility
+                    device_ts = datetime.fromisoformat(
+                        device_ts_str.replace("Z", "+00:00")
+                    )
+                else:
+                    device_ts = datetime.now(timezone.utc)
+
+                ax, ay, az = (
+                    payload.get("accel_x"),
+                    payload.get("accel_y"),
+                    payload.get("accel_z"),
+                )
+                magnitude = (
+                    math.sqrt(ax**2 + ay**2 + az**2)
+                    if all(v is not None for v in (ax, ay, az))
+                    else None
+                )
+
+                # 3. Create Telemetry Record
                 telemetry = Telemetry(
-                    event_type=payload.get("event"),
-                    battery_voltage=payload.get("battery"),
-                    cpsi=payload.get("cpsi"),
-                    accel_x=payload.get("accel_x"),
-                    accel_y=payload.get("accel_y"),
-                    accel_z=payload.get("accel_z"),
+                    device_id=device.id,
+                    device_ts=device_ts,
+                    event_type=payload.get("event", "PERIODIC"),
+                    latitude=payload.get("lat"),
+                    longitude=payload.get("lon"),
+                    altitude_m=payload.get("alt"),
+                    speed_kmh=payload.get("speed"),
+                    battery_voltage=payload.get("bat_v"),
+                    battery_pct=payload.get("bat_pct"),
+                    cpsi_raw=payload.get("cpsi"),
+                    gps_ttff=payload.get("ttff"),
+                    accel_x=ax,
+                    accel_y=ay,
+                    accel_z=az,
+                    accel_magnitude=magnitude,
+                    is_moving=magnitude > 1.2
+                    if magnitude is not None
+                    else None,  # tune threshold
                 )
                 db.add(telemetry)
+
+                # 4. Update Device Quick-Status
+                device.last_seen = datetime.now(timezone.utc)
+
+                # Commit is handled automatically by the get_session context manager
 
         except json.JSONDecodeError:
             logger.error("Failed to decode MQTT payload. Invalid JSON.")
