@@ -16,15 +16,20 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          uv sync --frozen
 
       - name: Set up environment
         run: |
@@ -32,13 +37,13 @@ jobs:
 
       - name: Run tests
         run: |
-          pytest tests/ -v
-          
+          uv run pytest tests/ -v
+
   build_and_push:
     needs: test
     runs-on: ubuntu-latest
     #remember to do this: https://github.com/docker/build-push-action/issues/606#issuecomment-1117661805
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
