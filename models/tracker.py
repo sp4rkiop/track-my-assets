@@ -127,6 +127,7 @@ class OtaRelease(Base):
     )
     firmware_url: Mapped[str] = mapped_column(String, nullable=False)
     checksum_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    min_firmware_version: Mapped[str | None] = mapped_column(String, nullable=True)
     is_stable: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     released_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

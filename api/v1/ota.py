@@ -1,7 +1,16 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.deps import get_db
-from schemas.tracker import OtaReleaseCreate, OtaReleaseRead, OtaJobCreate, OtaJobRead
+from core.mqtt_client import MQTTService
+from schemas.tracker import (
+    OtaReleaseCreate,
+    OtaReleaseRead,
+    OtaJobCreate,
+    OtaJobRead,
+    OtaRolloutResponse,
+)
 from services.device_service import DeviceService
 from services.ota_service import OtaService
 
@@ -20,6 +29,7 @@ async def create_ota_release(
 
 @router.post("/jobs", response_model=OtaJobRead)
 async def create_ota_job(job_req: OtaJobCreate, db: AsyncSession = Depends(get_db)):
+    # 1. Validate Device & Release
     device = await DeviceService.get_by_imei(db, job_req.imei)
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
@@ -28,4 +38,51 @@ async def create_ota_job(job_req: OtaJobCreate, db: AsyncSession = Depends(get_d
     if not release:
         raise HTTPException(status_code=404, detail="Firmware release not found")
 
-    return await OtaService.create_job(db, device.id, release.id)
+    # 2. Prevent duplicate active jobs
+    # (Optional: Add a check here to ensure the device doesn't already have a 'pending' job)
+
+    # 3. Create the Job in the Database
+    job = await OtaService.create_job(db, device.id, release.id)
+
+    # 4. THE TRIGGER: Push the OTA command to the tracker via MQTT
+    command_payload = {
+        "cmd": "OTA_UPDATE",
+        "version": release.version,
+        "url": release.firmware_url,
+        "sha256": release.checksum_sha256,
+    }
+
+    published = await MQTTService.publish_command(device.imei, command_payload)
+
+    if not published:
+        # Note: We don't fail the HTTP request if MQTT fails, because QoS 1
+        # offline queuing might just be waiting for the broker to reconnect.
+        job.status = "failed_to_publish"
+        await db.commit()
+
+    return job
+
+
+@router.post("/releases/{release_id}/rollout", response_model=OtaRolloutResponse)
+async def trigger_fleet_rollout(release_id: UUID, db: AsyncSession = Depends(get_db)):
+    """
+    Triggers a bulk OTA update for all active devices that meet the firmware requirements.
+    """
+    release = await OtaService.get_release_by_id(db, release_id)
+    if not release:
+        raise HTTPException(status_code=404, detail="Release not found")
+
+    if not release.is_stable:
+        # Safety check: Prevent rolling out experimental builds to the whole fleet
+        raise HTTPException(
+            status_code=400, detail="Cannot bulk rollout an unstable release."
+        )
+
+    stats = await OtaService.execute_bulk_rollout(db, release)
+
+    return OtaRolloutResponse(
+        message="Fleet rollout executed successfully.",
+        eligible_devices_count=stats["eligible"],
+        jobs_created=stats["jobs"],
+        mqtt_commands_sent=stats["mqtt"],
+    )

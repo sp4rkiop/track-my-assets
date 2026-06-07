@@ -107,4 +107,3 @@ def get_logger(name: str) -> RequestLoggerAdapter:
 
 # Default module-level logger — `from core.logger import logger`
 logger = get_logger("app")
-

@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
     CACHE_EXPIRY: int = 3600
+    MAXMIND_LICENSE_KEY: str | None = None
 
     # ---- Database ----------------------------------------------------------
     DB_NAME: str = "postgres"

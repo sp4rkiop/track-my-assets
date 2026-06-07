@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from core.config import settings
 from core.database import PostgreSQLDatabase
-from models.tracker import Device, Telemetry
+from models.tracker import Device, OtaJob, Telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,7 @@ class MQTTService:
 
     @classmethod
     async def _process_message(cls, message: aiomqtt.Message):
-        """Handles incoming payloads, maps IMEI to Device, and writes to TimescaleDB."""
+        """Handles incoming payloads, updates Device state, manages OTA jobs, and writes Telemetry."""
         try:
             if message.payload is None:
                 return
@@ -108,17 +108,59 @@ class MQTTService:
                     logger.info(f"New device detected. Registering IMEI: {imei}")
                     device = Device(name=f"Tracker-{imei[-4:]}", imei=imei)
                     db.add(device)
-                    await db.flush()
+                    await db.flush()  # Flush to get device.id immediately
 
-                # 2. Parse timestamp — fall back to server time if no RTC lock
+                # 2. Update Core Device Metadata (Syncing physical state)
+                fw_ver = payload.get("fw_ver")
+                iccid = payload.get("iccid")
+
+                if fw_ver and device.firmware_version != fw_ver:
+                    device.firmware_version = fw_ver
+                if iccid and device.sim_iccid != iccid:
+                    device.sim_iccid = iccid
+
+                # 3. Handle OTA Job State Machine
+                ota_status = payload.get("ota_status")
+                if ota_status:
+                    # Find the most recent active OTA job for this device
+                    job_query = (
+                        select(OtaJob)
+                        .where(
+                            OtaJob.device_id == device.id,
+                            OtaJob.status.in_(["pending", "sent", "downloading"]),
+                        )
+                        .order_by(OtaJob.created_at.desc())
+                        .limit(1)
+                    )
+
+                    active_job = (await db.execute(job_query)).scalar_one_or_none()
+
+                    if active_job:
+                        active_job.status = ota_status
+                        if ota_status in ["success", "failed"]:
+                            active_job.completed_at = datetime.now(timezone.utc)
+                        logger.info(
+                            f"Updated OTA Job {active_job.id} for {imei} to {ota_status}"
+                        )
+
+                # 4. Bulletproof Timestamp Parsing
                 device_ts_str = payload.get("ts")
-                device_ts = (
-                    datetime.fromisoformat(device_ts_str.replace("Z", "+00:00"))
-                    if device_ts_str
-                    else datetime.now(timezone.utc)
-                )
+                device_ts = None
+                if device_ts_str:
+                    try:
+                        # Replace Z to make it compatible with Python's ISO parser
+                        device_ts = datetime.fromisoformat(
+                            device_ts_str.replace("Z", "+00:00")
+                        )
+                    except ValueError:
+                        logger.warning(
+                            f"Malformed timestamp '{device_ts_str}' from {imei}. Falling back to server time."
+                        )
 
-                # 3. Compute IMU magnitude
+                if not device_ts:
+                    device_ts = datetime.now(timezone.utc)
+
+                # 5. Compute IMU magnitude
                 ax, ay, az = (
                     payload.get("accel_x"),
                     payload.get("accel_y"),
@@ -130,10 +172,7 @@ class MQTTService:
                     else None
                 )
 
-                # 4. Upsert telemetry — ON CONFLICT DO NOTHING handles QoS-1 duplicates.
-                #    The conflict target is the composite PK (device_id, device_ts).
-                #    A duplicate means the broker re-delivered an already-stored message;
-                #    silently skipping is correct — the data is already there.
+                # 6. Upsert telemetry — ON CONFLICT DO NOTHING handles QoS-1 duplicates.
                 stmt = (
                     insert(Telemetry)
                     .values(
@@ -162,16 +201,11 @@ class MQTTService:
                         accel_magnitude=magnitude,
                         is_moving=magnitude > 1.2 if magnitude is not None else None,
                     )
-                    .on_conflict_do_nothing(
-                        index_elements=[
-                            "device_id",
-                            "device_ts",
-                        ]  # composite PK columns
-                    )
+                    .on_conflict_do_nothing(index_elements=["device_id", "device_ts"])
                 )
                 await db.execute(stmt)
 
-                # 5. Update device quick-status — always refresh even on duplicate telemetry
+                # 7. Update device quick-status
                 device.last_seen = datetime.now(timezone.utc)
 
         except json.JSONDecodeError:
@@ -180,6 +214,23 @@ class MQTTService:
             )
         except Exception as e:
             logger.error(f"Error processing MQTT message: {e}", exc_info=True)
+
+    @classmethod
+    async def publish_command(cls, imei: str, payload: dict):
+        """Pushes a command directly to a specific tracker."""
+        if cls._client is None:
+            logger.error("Cannot publish: MQTT client is not initialized.")
+            return False
+
+        topic = f"trackers/{imei}/commands"
+        try:
+            # QoS 1 ensures the tower holds the message if the bike is in a tunnel
+            await cls._client.publish(topic, payload=json.dumps(payload), qos=1)
+            logger.info(f"Successfully published command to {topic}: {payload}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to publish to {topic}: {e}")
+            return False
 
     @classmethod
     async def close_connection(cls):

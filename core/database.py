@@ -1,4 +1,3 @@
-import logging
 import subprocess
 import sys
 from sqlalchemy import text
@@ -6,14 +5,13 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from contextlib import asynccontextmanager
 from core.config import settings
-from models.base import Base
 from typing import AsyncGenerator, Any
 from urllib.parse import quote_plus
+from core.logger import get_logger
 
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Async database engine and session factory
 DATABASE_URL = f"postgresql+asyncpg://{quote_plus(settings.DB_USER)}:{quote_plus(settings.DB_PASSWORD)}@{settings.DB_HOST}:{settings.DB_PORT}/{quote_plus(settings.DB_NAME)}"

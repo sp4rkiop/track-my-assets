@@ -51,7 +51,15 @@ class OtaReleaseCreate(BaseModel):
     version: str
     firmware_url: str
     checksum_sha256: str
+    min_firmware_version: str | None = None
     is_stable: bool = False
+
+
+class OtaRolloutResponse(BaseModel):
+    message: str
+    eligible_devices_count: int
+    jobs_created: int
+    mqtt_commands_sent: int
 
 
 class OtaReleaseRead(OtaReleaseCreate):
