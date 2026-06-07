@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 import logging
 import json
 import math
-import ssl
 import aiomqtt
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
@@ -20,26 +19,18 @@ class MQTTService:
 
     @classmethod
     async def initialize(cls):
-        """Prepares the MQTT client configuration with MQTTS (TLS) and Auth."""
-
-        # Configure TLS context for MQTTS
-        # create_default_context() is perfect if Mosquitto uses Let's Encrypt/Public Certs.
-        tls_context = ssl.create_default_context()
-
-        # Optional: If you are using self-signed certs in local dev, uncomment below:
-        tls_context.check_hostname = False
-        tls_context.verify_mode = ssl.CERT_NONE
+        """Prepares the MQTT client configuration with plain MQTT and Auth."""
 
         cls._client = aiomqtt.Client(
             hostname=settings.MQTT_HOST,
             port=settings.MQTT_PORT,
             username=settings.MQTT_USER,
             password=settings.MQTT_PASSWORD,
-            tls_context=tls_context,  # <-- This enables MQTTS (Port 8883)
+            # tls_context is intentionally omitted here to use plaintext MQTT over port 1883
             clean_session=False,
             identifier="fastapi_backend",
         )
-        logger.info("MQTT Client (MQTTS) configuration initialized.")
+        logger.info("MQTT Client (Plaintext) configuration initialized.")
 
     @classmethod
     async def start_listening(cls):
@@ -57,7 +48,7 @@ class MQTTService:
             while True:
                 try:
                     async with client:
-                        logger.info("Connected securely to Mosquitto Broker via MQTTS.")
+                        logger.info("Connected to Mosquitto Broker via plain MQTT.")
                         await client.subscribe("trackers/+/location", qos=1)
 
                         async for message in client.messages:

@@ -26,7 +26,7 @@ class Settings(BaseSettings):
 
     # ---- MQTT --------------------------------------------------------------
     MQTT_HOST: str = Field(default="localhost")
-    MQTT_PORT: int = Field(default=8883)
+    MQTT_PORT: int = Field(default=1883)
     MQTT_USER: str | None = Field(default="devuser")
     MQTT_PASSWORD: str | None = Field(default="devpassword")
 
