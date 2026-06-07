@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     MQTT_PORT: int = Field(default=1883)
     MQTT_USER: str | None = Field(default="devuser")
     MQTT_PASSWORD: str | None = Field(default="devpassword")
+    MQTT_TLS: bool = False
 
 
 settings = Settings()

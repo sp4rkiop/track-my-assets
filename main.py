@@ -22,27 +22,27 @@ async def lifespan(app: FastAPI):
     await MQTTService.initialize()
     await MQTTService.start_listening()
 
-    # Load previously downloaded files on startup if they exist
-    await load_readers()
+    # # Load previously downloaded files on startup if they exist
+    # await load_readers()
 
-    # Initialize the asyncio-compatible scheduler
-    scheduler = AsyncIOScheduler()
+    # # Initialize the asyncio-compatible scheduler
+    # scheduler = AsyncIOScheduler()
 
-    # Kick off a non-blocking initial update immediately upon startup
-    scheduler.add_job(scheduled_db_update, "date", run_date=None)
+    # # Kick off a non-blocking initial update immediately upon startup
+    # scheduler.add_job(scheduled_db_update, "date", run_date=None)
 
-    # Schedule regular updates (Wednesdays and Saturdays at 2:00 AM)
-    scheduler.add_job(
-        scheduled_db_update, "cron", day_of_week="wed,sat", hour=2, minute=0
-    )
+    # # Schedule regular updates (Wednesdays and Saturdays at 2:00 AM)
+    # scheduler.add_job(
+    #     scheduled_db_update, "cron", day_of_week="wed,sat", hour=2, minute=0
+    # )
 
-    scheduler.start()
+    # scheduler.start()
 
     yield
     # --- shutdown ---
     # 3. Shutdown: Clean up background tasks and file handlers
-    scheduler.shutdown()
-    await close_readers()
+    # scheduler.shutdown()
+    # await close_readers()
 
     await MQTTService.close_connection()
     await PostgreSQLDatabase.close_all_connections()
@@ -66,7 +66,7 @@ app.add_middleware(
 )
 app.add_middleware(RequestIdMiddleware)
 
-app.include_router(ipinfo.router, prefix="/api/v1/ipinfo", tags=["Ip-Info"])
+# app.include_router(ipinfo.router, prefix="/api/v1/ipinfo", tags=["Ip-Info"])
 app.include_router(devices.router, prefix="/api/v1/devices", tags=["Devices"])
 app.include_router(telemetry.router, prefix="/api/v1/telemetry", tags=["Telemetry"])
 app.include_router(ota.router, prefix="/api/v1/ota", tags=["OTA Updates"])

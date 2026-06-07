@@ -4,6 +4,7 @@ import logging
 import json
 import math
 import aiomqtt
+import ssl
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from core.config import settings
@@ -19,18 +20,29 @@ class MQTTService:
 
     @classmethod
     async def initialize(cls):
-        """Prepares the MQTT client configuration with plain MQTT and Auth."""
+        """Prepares the MQTT client configuration with dynamic TLS based on environment settings."""
+        use_tls = settings.MQTT_TLS
+
+        if use_tls:
+            tls_context = ssl.create_default_context()
+            # tls_context.check_hostname = False  # Uncomment if using self-signed certs
+            # tls_context.verify_mode = ssl.CERT_NONE
+            logger.info("MQTT Client configuration initialized WITH TLS (MQTTS).")
+        else:
+            tls_context = None
+            logger.info(
+                "MQTT Client configuration initialized WITHOUT TLS (Plaintext)."
+            )
 
         cls._client = aiomqtt.Client(
             hostname=settings.MQTT_HOST,
             port=settings.MQTT_PORT,
             username=settings.MQTT_USER,
             password=settings.MQTT_PASSWORD,
-            # tls_context is intentionally omitted here to use plaintext MQTT over port 1883
+            tls_context=tls_context,  # None = Plaintext, Context = Encrypted
             clean_session=False,
-            identifier="fastapi_backend",
+            identifier="fastapi_backend-test",
         )
-        logger.info("MQTT Client (Plaintext) configuration initialized.")
 
     @classmethod
     async def start_listening(cls):
@@ -48,7 +60,7 @@ class MQTTService:
             while True:
                 try:
                     async with client:
-                        logger.info("Connected to Mosquitto Broker via plain MQTT.")
+                        logger.info("Connected to Mosquitto Broker.")
                         await client.subscribe("trackers/+/location", qos=1)
 
                         async for message in client.messages:
@@ -97,9 +109,13 @@ class MQTTService:
 
                 if not device:
                     logger.info(f"New device detected. Registering IMEI: {imei}")
-                    device = Device(name=f"Tracker-{imei[-4:]}", imei=imei)
+                    device_name = f"Tracker-{imei[-4:]}"
+                    device = Device(name=device_name, imei=imei)
                     db.add(device)
                     await db.flush()  # Flush to get device.id immediately
+
+                    # Tell Home Assistant about the new tracker instantly
+                    asyncio.create_task(cls.publish_ha_discovery(imei, device_name))
 
                 # 2. Update Core Device Metadata (Syncing physical state)
                 fw_ver = payload.get("fw_ver")
@@ -170,8 +186,8 @@ class MQTTService:
                         device_id=device.id,
                         device_ts=device_ts,
                         event_type=payload.get("event", "PERIODIC"),
-                        latitude=payload.get("lat"),
-                        longitude=payload.get("lon"),
+                        latitude=payload.get("latitude"),
+                        longitude=payload.get("longitude"),
                         altitude_m=payload.get("alt"),
                         speed_kmh=payload.get("speed"),
                         heading_deg=payload.get("heading"),
@@ -222,6 +238,74 @@ class MQTTService:
         except Exception as e:
             logger.error(f"Failed to publish to {topic}: {e}")
             return False
+
+    @classmethod
+    async def publish_ha_discovery(cls, imei: str, device_name: str):
+        """Publishes Home Assistant Auto-Discovery configurations."""
+        if cls._client is None:
+            return
+
+        # Base device identifier to group all sensors together in HA
+        ha_device = {
+            "identifiers": [f"tracker_{imei}"],
+            "name": device_name,
+            "manufacturer": "Waveshare",
+            "model": "SIM7670G ESP32 Tracker",
+        }
+
+        state_topic = f"trackers/{imei}/location"
+
+        # 1. Device Tracker Config (The Map)
+        tracker_config = {
+            "name": f"{device_name} Location",
+            "unique_id": f"{imei}_tracker",
+            "json_attributes_topic": state_topic,
+            "json_attributes_template": "{{ value_json | tojson }}",
+            "device": ha_device,
+        }
+
+        # 2. Battery Sensor Config
+        battery_config = {
+            "name": f"{device_name} Battery",
+            "unique_id": f"{imei}_battery",
+            "state_topic": state_topic,
+            "value_template": "{{ value_json.bat_pct }}",
+            "device_class": "battery",
+            "unit_of_measurement": "%",
+            "device": ha_device,
+        }
+
+        # 3. Motion Binary Sensor Config
+        motion_config = {
+            "name": f"{device_name} Moving",
+            "unique_id": f"{imei}_motion",
+            "state_topic": state_topic,
+            # If speed > 2kmh, it's ON (Moving), else OFF (Parked)
+            "value_template": "{% if value_json.speed | float > 2.0 %}ON{% else %}OFF{% endif %}",
+            "device_class": "moving",
+            "device": ha_device,
+        }
+
+        # Publish configs with retain=True so HA sees them even if it restarts
+        try:
+            await cls._client.publish(
+                f"homeassistant/device_tracker/{imei}/config",
+                payload=json.dumps(tracker_config),
+                retain=True,
+            )
+            await cls._client.publish(
+                f"homeassistant/sensor/{imei}_battery/config",
+                payload=json.dumps(battery_config),
+                retain=True,
+            )
+            await cls._client.publish(
+                f"homeassistant/binary_sensor/{imei}_motion/config",
+                payload=json.dumps(motion_config),
+                retain=True,
+            )
+            logger.info(f"Published Home Assistant Auto-Discovery for {imei}")
+        except Exception as e:
+            logger.error(f"Failed to publish HA discovery: {e}")
 
     @classmethod
     async def close_connection(cls):
