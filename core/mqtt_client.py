@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timezone
+import hashlib
 import logging
 import json
 import math
@@ -39,7 +40,7 @@ class MQTTService:
             port=settings.MQTT_PORT,
             username=settings.MQTT_USER,
             password=settings.MQTT_PASSWORD,
-            tls_context=tls_context,  # None = Plaintext, Context = Encrypted
+            tls_context=tls_context,
             clean_session=False,
             identifier="fastapi_backend-test",
         )
@@ -47,7 +48,6 @@ class MQTTService:
     @classmethod
     async def start_listening(cls):
         """Starts the non-blocking background subscription loop."""
-
         if cls._client is None:
             raise RuntimeError(
                 "MQTT Client is not initialized. Call initialize() first."
@@ -64,7 +64,6 @@ class MQTTService:
                         await client.subscribe("trackers/+/location", qos=1)
 
                         async for message in client.messages:
-                            # Process messages asynchronously
                             asyncio.create_task(cls._process_message(message))
 
                 except aiomqtt.MqttError as error:
@@ -107,24 +106,39 @@ class MQTTService:
                 result = await db.execute(select(Device).where(Device.imei == imei))
                 device = result.scalar_one_or_none()
 
+                is_new_device = False
                 if not device:
                     logger.info(f"New device detected. Registering IMEI: {imei}")
-                    device_name = f"Tracker-{imei[-4:]}"
+                    hex_id = hashlib.md5(imei.encode()).hexdigest()[:6].upper()
+                    device_name = f"Tracker-{hex_id}"
                     device = Device(name=device_name, imei=imei)
                     db.add(device)
-                    await db.flush()  # Flush to get device.id immediately
-
-                    # Tell Home Assistant about the new tracker instantly
-                    asyncio.create_task(cls.publish_ha_discovery(imei, device_name))
+                    await db.flush()
+                    is_new_device = True
 
                 # 2. Update Core Device Metadata (Syncing physical state)
                 fw_ver = payload.get("fw_ver")
                 iccid = payload.get("iccid")
 
+                metadata_changed = False
                 if fw_ver and device.firmware_version != fw_ver:
                     device.firmware_version = fw_ver
+                    metadata_changed = True
                 if iccid and device.sim_iccid != iccid:
                     device.sim_iccid = iccid
+                    metadata_changed = True
+
+                # --- TRIGGER HA DISCOVERY ---
+                # Republish HA configs if it's a new device OR if firmware/SIM changed
+                if is_new_device or metadata_changed:
+                    asyncio.create_task(
+                        cls.publish_ha_discovery(
+                            imei=device.imei,
+                            device_name=device.name,
+                            fw_ver=device.firmware_version,
+                            iccid=device.sim_iccid,
+                        )
+                    )
 
                 # 3. Handle OTA Job State Machine
                 ota_status = payload.get("ota_status")
@@ -179,7 +193,7 @@ class MQTTService:
                     else None
                 )
 
-                # 6. Upsert telemetry — ON CONFLICT DO NOTHING handles QoS-1 duplicates.
+                # 6. Upsert telemetry
                 stmt = (
                     insert(Telemetry)
                     .values(
@@ -228,7 +242,6 @@ class MQTTService:
         if cls._client is None:
             logger.error("Cannot publish: MQTT client is not initialized.")
             return False
-
         topic = f"trackers/{imei}/commands"
         try:
             # QoS 1 ensures the tower holds the message if the bike is in a tunnel
@@ -240,12 +253,18 @@ class MQTTService:
             return False
 
     @classmethod
-    async def publish_ha_discovery(cls, imei: str, device_name: str):
+    async def publish_ha_discovery(
+        cls,
+        imei: str,
+        device_name: str,
+        fw_ver: str | None = None,
+        iccid: str | None = None,
+    ):
         """Publishes Home Assistant Auto-Discovery configurations."""
         if cls._client is None:
             return
 
-        # Base device identifier to group all sensors together in HA
+        # 1. Base Device Info (Includes SW Version & Serial Number)
         ha_device = {
             "identifiers": [f"tracker_{imei}"],
             "name": device_name,
@@ -253,20 +272,33 @@ class MQTTService:
             "model": "SIM7670G ESP32 Tracker",
         }
 
+        # Inject dynamic metadata so HA's device registry updates automatically
+        if fw_ver:
+            ha_device["sw_version"] = fw_ver
+        if iccid:
+            ha_device["hw_version"] = (
+                f"SIM ICCID: {iccid[-6:]}"  # Partial ICCID for security/brevity
+            )
+
         state_topic = f"trackers/{imei}/location"
 
-        # 1. Device Tracker Config (The Map)
-        tracker_config = {
-            "name": f"{device_name} Location",
+        # --- SENSOR CONFIGURATIONS ---
+        configs = {}
+
+        # Tracker (GPS Map)
+        configs["device_tracker"] = {
+            "name": "Location",
+            "has_entity_name": True,
             "unique_id": f"{imei}_tracker",
             "json_attributes_topic": state_topic,
-            "json_attributes_template": "{{ value_json | tojson }}",
+            "source_type": "gps",  # Forces HA to use latitude/longitude from JSON attributes
             "device": ha_device,
         }
 
-        # 2. Battery Sensor Config
-        battery_config = {
-            "name": f"{device_name} Battery",
+        # Battery Percentage
+        configs["sensor_battery"] = {
+            "name": "Battery",
+            "has_entity_name": True,
             "unique_id": f"{imei}_battery",
             "state_topic": state_topic,
             "value_template": "{{ value_json.bat_pct }}",
@@ -275,9 +307,57 @@ class MQTTService:
             "device": ha_device,
         }
 
-        # 3. Motion Binary Sensor Config
-        motion_config = {
-            "name": f"{device_name} Moving",
+        # Battery Voltage
+        configs["sensor_voltage"] = {
+            "name": "Voltage",
+            "has_entity_name": True,
+            "unique_id": f"{imei}_voltage",
+            "state_topic": state_topic,
+            "value_template": "{{ value_json.bat_v | float(0) }}",  # Cast to float
+            "device_class": "voltage",
+            "unit_of_measurement": "V",
+            "suggested_display_precision": 2,
+            "device": ha_device,
+        }
+
+        # Speed
+        configs["sensor_speed"] = {
+            "name": "Speed",
+            "has_entity_name": True,
+            "unique_id": f"{imei}_speed",
+            "state_topic": state_topic,
+            "value_template": "{{ value_json.speed }}",
+            "device_class": "speed",
+            "unit_of_measurement": "km/h",
+            "device": ha_device,
+        }
+
+        # Event (e.g., BUMP, PERIODIC)
+        configs["sensor_event"] = {
+            "name": "Event",
+            "has_entity_name": True,
+            "unique_id": f"{imei}_event",
+            "state_topic": state_topic,
+            "value_template": "{{ value_json.event }}",
+            "icon": "mdi:bell-ring",
+            "device": ha_device,
+        }
+
+        # Cellular Signal (Diagnostic Category)
+        configs["sensor_cellular"] = {
+            "name": "Cellular CPSI",
+            "unique_id": f"{imei}_cpsi",
+            "state_topic": state_topic,
+            "value_template": "{{ value_json.cpsi }}",
+            "icon": "mdi:cellphone-wireless",
+            "entity_category": "diagnostic",  # Puts it in the "Diagnostics" section of HA
+            "device": ha_device,
+        }
+
+        # Motion Binary Sensor
+        configs["binary_sensor_motion"] = {
+            "name": "Moving",
+            "has_entity_name": True,
             "unique_id": f"{imei}_motion",
             "state_topic": state_topic,
             # If speed > 2kmh, it's ON (Moving), else OFF (Parked)
@@ -286,24 +366,47 @@ class MQTTService:
             "device": ha_device,
         }
 
-        # Publish configs with retain=True so HA sees them even if it restarts
+        # Publish all configs
         try:
             await cls._client.publish(
                 f"homeassistant/device_tracker/{imei}/config",
-                payload=json.dumps(tracker_config),
+                payload=json.dumps(configs["device_tracker"]),
                 retain=True,
             )
             await cls._client.publish(
                 f"homeassistant/sensor/{imei}_battery/config",
-                payload=json.dumps(battery_config),
+                payload=json.dumps(configs["sensor_battery"]),
+                retain=True,
+            )
+            await cls._client.publish(
+                f"homeassistant/sensor/{imei}_voltage/config",
+                payload=json.dumps(configs["sensor_voltage"]),
+                retain=True,
+            )
+            await cls._client.publish(
+                f"homeassistant/sensor/{imei}_speed/config",
+                payload=json.dumps(configs["sensor_speed"]),
+                retain=True,
+            )
+            await cls._client.publish(
+                f"homeassistant/sensor/{imei}_event/config",
+                payload=json.dumps(configs["sensor_event"]),
+                retain=True,
+            )
+            await cls._client.publish(
+                f"homeassistant/sensor/{imei}_cellular/config",
+                payload=json.dumps(configs["sensor_cellular"]),
                 retain=True,
             )
             await cls._client.publish(
                 f"homeassistant/binary_sensor/{imei}_motion/config",
-                payload=json.dumps(motion_config),
+                payload=json.dumps(configs["binary_sensor_motion"]),
                 retain=True,
             )
-            logger.info(f"Published Home Assistant Auto-Discovery for {imei}")
+
+            logger.info(
+                f"Published extended HA Auto-Discovery for {imei} (FW: {fw_ver})"
+            )
         except Exception as e:
             logger.error(f"Failed to publish HA discovery: {e}")
 
