@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     MQTT_USER: str | None = Field(default="devuser")
     MQTT_PASSWORD: str | None = Field(default="devpassword")
     MQTT_TLS: bool = False
+    MQTT_CLIENT_ID: str = "fastapi_backend_dev"
 
 
 settings = Settings()

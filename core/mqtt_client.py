@@ -42,7 +42,7 @@ class MQTTService:
             password=settings.MQTT_PASSWORD,
             tls_context=tls_context,
             clean_session=False,
-            identifier="fastapi_backend-test",
+            identifier=settings.MQTT_CLIENT_ID,
         )
 
     @classmethod
