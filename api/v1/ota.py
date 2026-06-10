@@ -2,6 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi.responses import FileResponse
 from core.deps import get_db
 from core.mqtt_client import MQTTService
 from schemas.tracker import (
@@ -85,4 +86,27 @@ async def trigger_fleet_rollout(release_id: UUID, db: AsyncSession = Depends(get
         eligible_devices_count=stats["eligible"],
         jobs_created=stats["jobs"],
         mqtt_commands_sent=stats["mqtt"],
+    )
+
+
+@router.get("/download/{version}")
+async def download_firmware(version: str):
+    """
+    Acts as a proxy for the ESP32 to download the cached firmware binary.
+    Includes self-healing: if the file was purged from cache, it is recovered on the fly.
+    """
+    # Ask the service layer for the file path (it will heal itself if missing)
+    file_path = await OtaService.ensure_firmware_downloaded(version)
+
+    if not file_path:
+        raise HTTPException(
+            status_code=404,
+            detail="Firmware binary not found in cache and could not be recovered from GitHub.",
+        )
+
+    # Stream the file directly to the ESP32
+    return FileResponse(
+        path=file_path,
+        media_type="application/octet-stream",
+        filename=f"tracker-{version}.bin",
     )

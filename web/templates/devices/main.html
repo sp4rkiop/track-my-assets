@@ -1,0 +1,182 @@
+<div class="fade-in space-y-6" hx-get="/web/devices" hx-trigger="every 15s [!window.telemetryModalOpen]"
+    hx-swap="outerHTML">
+
+    <div class="flex justify-between items-end">
+        <div>
+            <h2 class="text-2xl font-bold text-neutral-100">Hardware Nodes</h2>
+            <p class="text-sm text-neutral-400 mt-1">Live status of registered tracking units. Auto-updates every 15s.
+            </p>
+        </div>
+        <div
+            class="flex items-center space-x-2 text-xs font-medium text-neutral-500 bg-neutral-900 border border-neutral-800 px-3 py-1.5 rounded-full">
+            <span class="relative flex h-2 w-2">
+                <span
+                    class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+            <span>Live Sync Active</span>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-5">
+        {% for device in devices %}
+        <div
+            class="bg-neutral-900 border border-neutral-800 rounded-xl p-5 shadow-sm hover:border-neutral-700 transition-colors flex flex-col relative group">
+
+            <div class="flex justify-between items-start mb-3">
+                <div>
+                    <h3 class="text-lg font-bold text-neutral-100">{{ device.name }}</h3>
+                    <div class="text-[11px] text-neutral-400 mt-1 flex items-center space-x-1.5 font-mono-data">
+                        {% if device.is_online %}
+                        <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+                        <span class="text-emerald-400">Online</span>
+                        {% else %}
+                        <span class="h-1.5 w-1.5 rounded-full bg-neutral-600"></span>
+                        <span class="text-neutral-500">Offline</span>
+                        {% endif %}
+                        <span class="text-neutral-700">|</span>
+                        <span>Seen {{ device.last_seen }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div
+                class="flex justify-between items-center my-3 p-2.5 bg-neutral-950/50 rounded-lg border border-neutral-800/50">
+                <div>
+                    <div class="text-[10px] text-neutral-500 uppercase tracking-wider mb-0.5">Firmware</div>
+                    <div class="font-medium text-amber-500 font-mono-data text-xs">{{ device.firmware }}</div>
+                </div>
+                <div class="text-right">
+                    <div class="text-[10px] text-neutral-500 uppercase tracking-wider mb-0.5">IMEI</div>
+                    <div class="font-medium text-neutral-300 font-mono-data text-xs">{{ device.imei }}</div>
+                </div>
+            </div>
+
+            <div class="mt-auto pt-2 flex justify-between items-center">
+                <div class="text-[10px] text-neutral-600 truncate font-mono-data max-w-[100px]" title="{{ device.id }}">
+                    ID: {{ device.id[:8] }}...</div>
+
+                <button onclick="openTelemetryModal('{{ device.id }}', '{{ device.name }}')"
+                    class="px-4 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-medium rounded-lg border border-neutral-700 transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500/50">
+                    View Telemetry
+                </button>
+            </div>
+        </div>
+        {% else %}
+        <div
+            class="col-span-full p-12 text-center border-2 border-dashed border-neutral-800 rounded-xl bg-neutral-900/50">
+            <h3 class="text-lg font-medium text-neutral-300">No Devices Found</h3>
+            <p class="text-neutral-500 mt-1">Connect a tracker to the MQTT broker to register it automatically.</p>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div id="telemetry-modal"
+        class="hidden fixed inset-0 z-[100] bg-neutral-950/80 backdrop-blur-sm flex items-center justify-center p-4 opacity-0 transition-opacity duration-300">
+        <div class="bg-neutral-900 border border-neutral-800 rounded-xl w-full max-w-6xl h-[80vh] flex flex-col shadow-2xl transform scale-95 transition-transform duration-300 overflow-hidden"
+            id="telemetry-modal-content">
+
+            <div
+                class="px-6 py-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-950/50 rounded-t-xl">
+                <div>
+                    <h3 class="text-lg font-bold text-neutral-100" id="modal-device-name">Device Telemetry</h3>
+                    <p class="text-xs text-neutral-400 mt-0.5 font-mono-data" id="modal-device-id"></p>
+                </div>
+                <button onclick="closeTelemetryModal()"
+                    class="text-neutral-400 hover:text-neutral-100 transition-colors p-1.5 rounded-lg hover:bg-neutral-800">
+                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
+                        </path>
+                    </svg>
+                </button>
+            </div>
+
+            <div class="flex-1 min-h-0 overflow-auto" id="telemetry-table-container">
+                <div class="flex flex-col items-center justify-center h-full text-neutral-500 text-sm">
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-amber-500 mb-4"></div>
+                    <p class="font-mono-data tracking-widest text-xs">FETCHING RAW PAYLOADS...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global flag — read by hx-trigger to pause/resume the 15s device poll
+        window.telemetryModalOpen = false;
+
+        function openTelemetryModal(deviceId, deviceName) {
+            // After every 15s hx-swap="outerHTML" refresh a brand-new #telemetry-modal
+            // is injected into the content div alongside the one already teleported to
+            // <body>. Purge any extras now so getElementById is always unambiguous.
+            document.querySelectorAll('#telemetry-modal').forEach((el, i) => {
+                if (i > 0) el.remove();
+            });
+
+            const modal = document.getElementById('telemetry-modal');
+            const content = document.getElementById('telemetry-modal-content');
+
+            // Teleport to <body> so position:fixed escapes any CSS transform on the
+            // dashboard layout container and covers the true viewport.
+            if (modal.parentElement !== document.body) {
+                document.body.appendChild(modal);
+            }
+
+            document.getElementById('modal-device-name').innerText = deviceName + ' Telemetry Data';
+            document.getElementById('modal-device-id').innerText = 'NODE ID: ' + deviceId;
+
+            // Always reset to spinner before fetching — prevents stale rows from a
+            // previously viewed device flashing before the new response arrives.
+            document.getElementById('telemetry-table-container').innerHTML = `
+                <div class="flex flex-col items-center justify-center h-full text-neutral-500 text-sm">
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-amber-500 mb-4"></div>
+                    <p class="font-mono-data tracking-widest text-xs">FETCHING RAW PAYLOADS...</p>
+                </div>
+            `;
+
+            modal.classList.remove('hidden');
+            window.telemetryModalOpen = true;
+
+            setTimeout(() => {
+                modal.classList.remove('opacity-0');
+                content.classList.remove('scale-95');
+            }, 10);
+
+            // Drive the fetch through htmx.ajax so the target element is resolved
+            // fresh at call time — using hx-get on the button meant HTMX resolved
+            // the target at parse time and could cache a stale reference.
+            htmx.ajax('GET', `/web/devices/${deviceId}/telemetry`, {
+                target: '#telemetry-table-container',
+                swap: 'innerHTML'
+            });
+        }
+
+        function closeTelemetryModal() {
+            const modal = document.getElementById('telemetry-modal');
+            const content = document.getElementById('telemetry-modal-content');
+
+            window.telemetryModalOpen = false;
+            modal.classList.add('opacity-0');
+            content.classList.add('scale-95');
+
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                document.getElementById('telemetry-table-container').innerHTML = `
+                    <div class="flex flex-col items-center justify-center h-full text-neutral-500 text-sm">
+                        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-amber-500 mb-4"></div>
+                        <p class="font-mono-data tracking-widest text-xs">FETCHING RAW PAYLOADS...</p>
+                    </div>
+                `;
+            }, 300);
+        }
+
+        // After every HTMX content refresh, remove any duplicate modal nodes that
+        // were re-rendered inside the new content div — the canonical copy lives in
+        // <body> once the modal has been opened at least once.
+        document.addEventListener('htmx:afterSwap', () => {
+            const all = [...document.querySelectorAll('#telemetry-modal')];
+            if (all.length < 2) return;
+            const bodyModal = all.find(m => m.parentElement === document.body);
+            all.forEach(m => { if (m !== bodyModal) m.remove(); });
+        });
+    </script>
+</div>

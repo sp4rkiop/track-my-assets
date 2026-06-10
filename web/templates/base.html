@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en" id="theme-root" class="h-full bg-neutral-950 text-neutral-100 dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fleet//OS Asset Tracker</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+        rel="stylesheet">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+        }
+
+        .font-mono-data {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .fade-in {
+            animation: fadeIn 0.25s ease-out forwards;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(4px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+
+<body class="h-full flex flex-col md:flex-row transition-colors duration-200">
+
+    <header
+        class="md:hidden flex items-center justify-between bg-neutral-900 border-b border-neutral-800 px-4 py-3 sticky top-0 z-50">
+        <div class="flex items-center space-x-2">
+            <span class="text-amber-500 font-bold tracking-wider text-lg font-mono-data">FLEET//OS</span>
+        </div>
+        <button id="mobile-menu-btn" class="text-neutral-400 hover:text-white focus:outline-none">
+            <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+        </button>
+    </header>
+
+    <aside id="sidebar"
+        class="hidden md:flex flex-col w-64 bg-neutral-900 border-r border-neutral-800 h-full fixed md:sticky top-0 z-40">
+        <div class="h-16 flex items-center justify-between px-6 border-b border-neutral-800">
+            <span class="text-amber-500 font-black tracking-widest text-lg font-mono-data">FLEET // OS</span>
+        </div>
+
+        <nav class="flex-1 px-4 py-6 space-y-1.5" id="sidebar-nav">
+            <a href="/web/" data-nav="overview"
+                class="flex items-center px-4 py-2.5 text-sm font-medium rounded-lg transition-all {% if active_page == 'overview' %} bg-neutral-950 text-amber-500 border border-neutral-800 font-semibold {% else %} text-neutral-400 hover:bg-neutral-800/50 hover:text-neutral-200 {% endif %}">
+                Overview
+            </a>
+
+            <button hx-get="/web/devices" hx-target="#main-content" hx-push-url="true" data-nav="devices"
+                class="w-full flex items-center px-4 py-2.5 text-sm font-medium rounded-lg transition-all {% if active_page == 'devices' %} bg-neutral-950 text-amber-500 border border-neutral-800 font-semibold {% else %} text-neutral-400 hover:bg-neutral-800/50 hover:text-neutral-200 {% endif %}">
+                Device Hub
+            </button>
+
+            <button hx-get="/web/ota" hx-target="#main-content" hx-push-url="true" data-nav="ota"
+                class="w-full flex items-center px-4 py-2.5 text-sm font-medium rounded-lg transition-all {% if active_page == 'ota' %} bg-neutral-950 text-amber-500 border border-neutral-800 font-semibold {% else %} text-neutral-400 hover:bg-neutral-800/50 hover:text-neutral-200 {% endif %}">
+                OTA Management
+            </button>
+
+            <button hx-get="/web/trips" hx-target="#main-content" hx-push-url="true" data-nav="trips"
+                class="w-full flex items-center px-4 py-2.5 text-sm font-medium rounded-lg transition-all {% if active_page == 'trips' %} bg-neutral-950 text-amber-500 border border-neutral-800 font-semibold {% else %} text-neutral-400 hover:bg-neutral-800/50 hover:text-neutral-200 {% endif %}">
+                Trips & Telemetry
+            </button>
+        </nav>
+
+        <div class="p-4 border-t border-neutral-800 flex items-center justify-between text-xs text-neutral-500 bg-neutral-950/40"
+            hx-get="/api/health" hx-trigger="every 10s" hx-swap="innerHTML" id="server-health-beacon">
+            <span>Node Cluster: Online</span>
+            <div class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></div>
+        </div>
+    </aside>
+
+    <main
+        class="flex-1 flex flex-col min-w-0 overflow-y-auto bg-neutral-950 text-neutral-100 transition-colors duration-200"
+        id="content-frame">
+        <div id="main-content" class="p-4 md:p-8 max-w-7xl w-full mx-auto flex-1">
+            {% block content %}{% endblock %}
+        </div>
+    </main>
+
+    <script>
+        // --- 1. DYNAMIC SIDEBAR HIGHLIGHT OVERRIDE & LOOP PREVENTER ---
+
+        function syncSidebarState() {
+            // Read the actual URL shown in the browser address bar
+            const currentPath = window.location.pathname;
+            let activeNav = "overview";
+
+            if (currentPath.includes("/devices")) activeNav = "devices";
+            else if (currentPath.includes("/ota")) activeNav = "ota";
+            else if (currentPath.includes("/trips")) activeNav = "trips";
+
+            // Apply classes based purely on the URL state, ignoring background API polls
+            document.querySelectorAll('#sidebar-nav [data-nav]').forEach(el => {
+                if (el.getAttribute('data-nav') === activeNav) {
+                    el.className = "w-full flex items-center px-4 py-2.5 text-sm font-medium rounded-lg transition-all bg-neutral-950 text-amber-500 border border-neutral-800 font-semibold";
+                } else {
+                    el.className = "w-full flex items-center px-4 py-2.5 text-sm font-medium rounded-lg transition-all text-neutral-400 hover:bg-neutral-800/50 hover:text-neutral-200";
+                }
+            });
+        }
+
+        document.body.addEventListener('htmx:beforeRequest', function (evt) {
+            // Use the URL object to guarantee perfect matching between absolute/relative paths
+            const targetUrl = new URL(evt.detail.requestConfig.url, window.location.origin);
+            const currentPath = window.location.pathname;
+
+            // Clean trailing slashes to prevent /web and /web/ bypasses
+            const cleanTarget = targetUrl.pathname.replace(/\/$/, "") || "/";
+            const cleanCurrent = currentPath.replace(/\/$/, "") || "/";
+
+            // Strict Stop Strategy: Prevent loading if target path matches active page state
+            if (cleanTarget === cleanCurrent) {
+                evt.preventDefault();
+                return;
+            }
+
+            // Update dynamic selection visual states across button grids before components load
+            const pathSegment = cleanTarget.split('/').pop() || 'overview';
+            document.querySelectorAll('#sidebar-nav [data-nav]').forEach(el => {
+                if (el.getAttribute('data-nav') === pathSegment) {
+                    el.className = "w-full flex items-center px-4 py-2.5 text-sm font-medium rounded-lg transition-all bg-neutral-950 text-amber-500 border border-neutral-800 font-semibold";
+                } else {
+                    el.className = "w-full flex items-center px-4 py-2.5 text-sm font-medium rounded-lg transition-all text-neutral-400 hover:bg-neutral-800/50 hover:text-neutral-200";
+                }
+            });
+        });
+
+        // Whenever HTMX settles a new request (which updates the URL), sync the sidebar visually
+        document.body.addEventListener('htmx:afterSettle', syncSidebarState);
+
+        // Run once on initial page load
+        document.addEventListener("DOMContentLoaded", syncSidebarState);
+
+        // --- 2. MOBILE MENU TOGGLE LAYER ---
+        const btn = document.getElementById('mobile-menu-btn');
+        const sidebar = document.getElementById('sidebar');
+        btn.addEventListener('click', () => {
+            sidebar.classList.toggle('hidden');
+            sidebar.classList.toggle('flex');
+            sidebar.classList.toggle('absolute');
+            sidebar.classList.toggle('w-full');
+            sidebar.classList.toggle('h-screen');
+        });
+
+        document.body.addEventListener('htmx:afterOnLoad', () => {
+            if (window.innerWidth < 768) {
+                sidebar.classList.add('hidden');
+                sidebar.classList.remove('flex', 'absolute', 'w-full', 'h-screen');
+            }
+        });
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,292 @@
+<div class="fade-in flex flex-col lg:flex-row gap-6 h-[calc(100vh-8rem)] relative">
+
+    <div
+        class="w-full lg:w-1/3 flex flex-col bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden shadow-sm z-10">
+        <div class="p-5 border-b border-neutral-800 bg-neutral-900/80 space-y-4">
+            <div>
+                <h2 class="text-xl font-bold text-neutral-100">Historical Trips</h2>
+                <p class="text-sm text-neutral-400 mt-1">Select a route to visualize the telemetry path.</p>
+            </div>
+
+            <div>
+                <label class="block text-xs font-medium text-neutral-500 uppercase tracking-wider mb-1.5">Active
+                    Tracker</label>
+                <select id="device-select" onchange="changeDevice(this.value)"
+                    class="w-full bg-neutral-950 border border-neutral-700 rounded-lg p-2.5 text-sm text-neutral-200 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none transition-all cursor-pointer">
+                    {% if not devices %}
+                    <option value="" disabled selected>No devices found...</option>
+                    {% endif %}
+
+                    {% for device in devices %}
+                    <option value="{{ device.id }}">{{ device.name }} ({{ device.imei[-6:] }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <div id="trips-list" class="flex-1 overflow-y-auto p-3 space-y-3 relative">
+            <div id="trips-loading" class="animate-pulse flex flex-col space-y-3">
+                <div class="h-20 bg-neutral-800/50 rounded-lg"></div>
+                <div class="h-20 bg-neutral-800/50 rounded-lg"></div>
+                <div class="h-20 bg-neutral-800/50 rounded-lg"></div>
+            </div>
+            <div id="trips-content" class="space-y-3"></div>
+        </div>
+    </div>
+
+    <div
+        class="w-full lg:w-2/3 bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden relative shadow-sm min-h-[400px] lg:min-h-0 z-0">
+        <div id="map" class="w-full h-full z-0 bg-neutral-950"></div>
+
+        <div id="map-loader"
+            class="hidden absolute inset-0 bg-neutral-950/60 z-[400] flex items-center justify-center backdrop-blur-sm transition-opacity">
+            <div class="flex flex-col items-center">
+                <div class="h-8 w-8 rounded-full border-4 border-amber-500 border-t-transparent animate-spin"></div>
+                <span class="text-amber-500 font-medium mt-3 tracking-widest text-sm font-mono-data">DECODING
+                    ROUTE...</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="clipboard-toast"
+        class="fixed bottom-8 right-8 transform translate-y-20 opacity-0 transition-all duration-300 z-[1000] bg-neutral-900 text-emerald-400 border border-emerald-500/30 px-4 py-3 rounded-xl shadow-2xl flex items-center space-x-3 font-mono-data text-sm pointer-events-none">
+        <svg class="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4">
+            </path>
+        </svg>
+        <span id="toast-msg">Copied!</span>
+    </div>
+
+</div>
+
+<script>
+    // 1. Initialize Global State
+    var tripMap;
+    var tripRouteLayerGroup;
+    var currentDeviceId = document.getElementById('device-select') ? document.getElementById('device-select').value : null;
+
+    // Map Base Layers
+    var darkLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+        subdomains: 'abcd',
+        maxZoom: 20
+    });
+
+    var streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors',
+        maxZoom: 19
+    });
+
+    var satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles &copy; Esri',
+        maxZoom: 19
+    });
+
+    var themeObserver;
+
+    function initMap() {
+        // If HTMX swapped the DOM, we must properly destroy the old Leaflet map instance
+        if (tripMap !== undefined && tripMap !== null) {
+            tripMap.remove();
+        }
+
+        const isDark = document.documentElement.classList.contains('dark');
+
+        tripMap = L.map('map', {
+            zoomControl: false,
+            layers: [isDark ? darkLayer : streetLayer] // Set initial layer based on theme
+        }).setView([23.804, 86.427], 13);
+
+        L.control.zoom({ position: 'bottomright' }).addTo(tripMap);
+
+        // Add Layer Control to top right
+        const baseMaps = {
+            "High-Detail Street": streetLayer,
+            "Dark Mode": darkLayer,
+            "Satellite Vision": satelliteLayer
+        };
+        L.control.layers(baseMaps, null, { position: 'topright' }).addTo(tripMap);
+
+        tripRouteLayerGroup = L.layerGroup().addTo(tripMap);
+        setTimeout(() => tripMap.invalidateSize(), 100);
+
+        // Hook up the Auto-Theme Sync Observer
+        if (themeObserver) themeObserver.disconnect();
+        themeObserver = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                if (mutation.attributeName === 'class') {
+                    const darkActive = document.documentElement.classList.contains('dark');
+                    // Only auto-swap if they are currently using one of the default theme layers
+                    if (darkActive && tripMap.hasLayer(streetLayer)) {
+                        tripMap.removeLayer(streetLayer);
+                        tripMap.addLayer(darkLayer);
+                    } else if (!darkActive && tripMap.hasLayer(darkLayer)) {
+                        tripMap.removeLayer(darkLayer);
+                        tripMap.addLayer(streetLayer);
+                    }
+                }
+            });
+        });
+        themeObserver.observe(document.documentElement, { attributes: true });
+    }
+
+    // 2. Clipboard Toast System
+    var toastTimeout;
+    function copyCoordinate(lat, lng) {
+        const coordString = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+        navigator.clipboard.writeText(coordString).then(() => {
+            const toast = document.getElementById('clipboard-toast');
+            document.getElementById('toast-msg').innerText = `Copied: ${coordString}`;
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+
+            clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-100');
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3000);
+        });
+    }
+
+    // 3. Handle Device Switching
+    function changeDevice(newDeviceId) {
+        if (!newDeviceId) return;
+        currentDeviceId = newDeviceId;
+
+        // Reset UI state for new device
+        tripRouteLayerGroup.clearLayers();
+        document.getElementById('trips-content').innerHTML = "";
+        document.getElementById('trips-loading').style.display = "flex";
+
+        loadTrips();
+    }
+
+    // 4. Fetch and Render the Trips List
+    async function loadTrips() {
+        if (!currentDeviceId) return;
+
+        try {
+            const response = await fetch(`/api/devices/${currentDeviceId}/trips?limit=20`);
+            if (!response.ok) throw new Error("Failed to fetch trips");
+
+            const data = await response.json();
+            const contentContainer = document.getElementById('trips-content');
+            document.getElementById('trips-loading').style.display = 'none';
+
+            if (data.trips.length === 0) {
+                contentContainer.innerHTML = `<div class="text-center p-6 text-neutral-500">No trips recorded yet.</div>`;
+                return;
+            }
+
+            let html = "";
+            data.trips.forEach(trip => {
+                const startTime = new Date(trip.start_time).toLocaleString(undefined, {
+                    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                });
+                const tripGroupId = trip.trip_id.split('_').pop();
+
+                html += `
+                    <div onclick="loadRoute('${tripGroupId}', this)" 
+                         class="trip-card group cursor-pointer py-2.5 px-3.5 rounded-lg border border-neutral-800 bg-neutral-950 hover:bg-neutral-800/80 hover:border-amber-500/50 transition-all">
+                        <div class="flex justify-between items-center">
+                            <div class="flex flex-col">
+                                <h3 class="text-neutral-200 font-semibold group-hover:text-amber-400 transition-colors font-mono-data text-[13px]">${startTime}</h3>
+                                <div class="text-[11px] text-neutral-500 mt-1 flex items-center space-x-2 font-mono-data">
+                                    <span>Dur: ${trip.duration_mins}m</span>
+                                    <span class="text-neutral-700">|</span>
+                                    <span>Max: ${trip.max_speed_kmh} km/h</span>
+                                </div>
+                            </div>
+                            <div class="flex flex-col items-end">
+                                <span class="text-[10px] bg-neutral-900 border border-neutral-800 text-neutral-400 px-1.5 py-0.5 rounded font-mono-data">
+                                    ${trip.data_points} pts
+                                </span>
+                                <span class="text-[10px] text-neutral-600 mt-1 opacity-0 group-hover:opacity-100 transition-opacity font-medium">
+                                    Map Route &rarr;
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            contentContainer.innerHTML = html;
+
+        } catch (error) {
+            console.error(error);
+            document.getElementById('trips-content').innerHTML = `<div class="text-center p-6 text-red-400">Failed to load trips. Check console.</div>`;
+            document.getElementById('trips-loading').style.display = 'none';
+        }
+    }
+
+    // 5. Fetch and Draw the Polyline
+    async function loadRoute(tripGroupId, element) {
+        document.querySelectorAll('.trip-card').forEach(el => {
+            el.classList.remove('border-amber-500', 'bg-neutral-800');
+        });
+        element.classList.add('border-amber-500', 'bg-neutral-800');
+
+        const loader = document.getElementById('map-loader');
+        loader.classList.remove('hidden');
+
+        try {
+            const response = await fetch(`/api/devices/${currentDeviceId}/trips/${tripGroupId}/route`);
+            const data = await response.json();
+
+            tripRouteLayerGroup.clearLayers();
+
+            // Store raw Leaflet LatLng objects to enable precision distance calculations
+            const rawPoints = data.path.map(pt => L.latLng(pt.lat, pt.lng));
+            if (rawPoints.length === 0) throw new Error("No path data");
+
+            // Outer Glow
+            L.polyline(rawPoints, { color: '#f59e0b', weight: 12, opacity: 0.2, lineCap: 'round', lineJoin: 'round' }).addTo(tripRouteLayerGroup);
+
+            // Inner Interactive Core
+            const coreLine = L.polyline(rawPoints, { color: '#fbbf24', weight: 4, opacity: 1.0, lineCap: 'round', lineJoin: 'round', className: 'cursor-pointer' }).addTo(tripRouteLayerGroup);
+
+            // Add tooltip to let users know it is interactive
+            coreLine.bindTooltip("Click to copy exact coordinate", { sticky: true, className: "font-mono-data text-xs bg-neutral-900 text-neutral-200 border-neutral-700" });
+
+            // On click, calculate the exact closest telemetry point (avoids pixel interpolation drift)
+            coreLine.on('click', function (e) {
+                let closestPt = rawPoints[0];
+                let minDist = e.latlng.distanceTo(closestPt);
+                for (let i = 1; i < rawPoints.length; i++) {
+                    let d = e.latlng.distanceTo(rawPoints[i]);
+                    if (d < minDist) {
+                        minDist = d;
+                        closestPt = rawPoints[i];
+                    }
+                }
+                copyCoordinate(closestPt.lat, closestPt.lng);
+            });
+
+            // Start & End Markers (also copyable)
+            const startPt = rawPoints[0];
+            const endPt = rawPoints[rawPoints.length - 1];
+
+            const startMarker = L.circleMarker(startPt, { radius: 6, fillColor: '#10b981', color: '#059669', weight: 2, fillOpacity: 1, className: 'cursor-pointer' }).addTo(tripRouteLayerGroup);
+            startMarker.bindTooltip("Start Point (Click to copy)", { direction: 'top', className: "font-mono-data text-xs" });
+            startMarker.on('click', () => copyCoordinate(startPt.lat, startPt.lng));
+
+            const endMarker = L.circleMarker(endPt, { radius: 6, fillColor: '#ef4444', color: '#b91c1c', weight: 2, fillOpacity: 1, className: 'cursor-pointer' }).addTo(tripRouteLayerGroup);
+            endMarker.bindTooltip("End Point (Click to copy)", { direction: 'top', className: "font-mono-data text-xs" });
+            endMarker.on('click', () => copyCoordinate(endPt.lat, endPt.lng));
+
+            tripMap.flyToBounds(L.latLngBounds(rawPoints), { padding: [50, 50], duration: 1.5 });
+
+        } catch (error) {
+            console.error("Route drawing failed:", error);
+            alert("Could not load route data.");
+        } finally {
+            loader.classList.add('hidden');
+        }
+    }
+
+    // Execute when HTMX swaps this content in
+    initMap();
+    if (currentDeviceId) {
+        loadTrips();
+    }
+</script>

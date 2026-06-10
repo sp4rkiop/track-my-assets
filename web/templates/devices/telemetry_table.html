@@ -1,0 +1,76 @@
+<table class="w-full text-left text-sm text-neutral-300">
+    <thead
+        class="bg-neutral-950/80 text-xs uppercase text-neutral-500 border-b border-neutral-800 font-mono-data sticky top-0 z-10">
+        <tr>
+            <th scope="col" class="px-6 py-3.5 font-medium">Timestamp (UTC)</th>
+            <th scope="col" class="px-6 py-3.5 font-medium">Trigger Event</th>
+            <th scope="col" class="px-6 py-3.5 font-medium">Coordinates</th>
+            <th scope="col" class="px-6 py-3.5 font-medium">Speed</th>
+            <th scope="col" class="px-6 py-3.5 font-medium">Sats / HDOP</th>
+            <th scope="col" class="px-6 py-3.5 font-medium">Power</th>
+        </tr>
+    </thead>
+    <tbody class="divide-y divide-neutral-800/40 font-mono-data text-[13px]">
+        {% for t in telemetry %}
+        <tr class="hover:bg-neutral-800/20 transition-colors">
+            <td class="px-6 py-3 text-neutral-400">
+                {{ t.device_ts.strftime('%Y-%m-%d %H:%M:%S') }}
+            </td>
+
+            <td class="px-6 py-3">
+                {% if t.event_type == 'BUMP' %}
+                <span
+                    class="inline-flex items-center text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                    BUMP
+                </span>
+                {% elif t.event_type == 'STOP' %}
+                <span
+                    class="inline-flex items-center text-[10px] font-bold text-red-400 bg-red-500/10 px-2 py-0.5 rounded border border-red-500/20">
+                    STOP
+                </span>
+                {% else %}
+                <span
+                    class="inline-flex items-center text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                    {{ t.event_type }}
+                </span>
+                {% endif %}
+            </td>
+
+            <td class="px-6 py-3 text-neutral-300">
+                {% if t.latitude and t.longitude %}
+                {{ "%.5f"|format(t.latitude) }}, {{ "%.5f"|format(t.longitude) }}
+                {% else %}
+                <span class="text-neutral-600">No Fix</span>
+                {% endif %}
+            </td>
+
+            <td class="px-6 py-3">
+                <span
+                    class="{% if t.speed_kmh and t.speed_kmh > 0 %}text-neutral-200{% else %}text-neutral-600{% endif %}">
+                    {{ "%.1f"|format(t.speed_kmh or 0) }} km/h
+                </span>
+            </td>
+
+            <td class="px-6 py-3">
+                <span class="text-neutral-400">{{ t.satellites or 0 }}</span>
+                <span class="text-neutral-600 ml-1 mr-1">|</span>
+                <span class="text-neutral-500">{{ "%.1f"|format(t.hdop or 0) }}</span>
+            </td>
+
+            <td class="px-6 py-3">
+                <span
+                    class="{% if t.battery_pct and t.battery_pct < 20 %}text-red-400{% else %}text-emerald-400{% endif %}">
+                    {{ t.battery_pct|int }}%
+                </span>
+                <span class="text-neutral-500 ml-2 text-[11px]">{{ "%.2f"|format(t.battery_voltage or 0) }}V</span>
+            </td>
+        </tr>
+        {% else %}
+        <tr>
+            <td colspan="6" class="px-6 py-12 text-center text-neutral-500 font-sans">
+                No telemetry data has been pushed to the database for this device yet.
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>

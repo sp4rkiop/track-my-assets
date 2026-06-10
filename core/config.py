@@ -8,11 +8,13 @@ class Settings(BaseSettings):
     # ---- App ---------------------------------------------------------------
     APP_NAME: str = "fastapi-starter"
     APP_VERSION: str = "0.1.0"
+    BASE_URL: str = "http://localhost:8000"
     CORS_ORIGINS: list[str] = Field(default_factory=lambda: ["*"])
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
     CACHE_EXPIRY: int = 3600
     MAXMIND_LICENSE_KEY: str | None = None
+    GITHUB_TOKEN: str = "change-me"
 
     # ---- Database ----------------------------------------------------------
     DB_NAME: str = "postgres"
