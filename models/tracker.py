@@ -83,9 +83,12 @@ class Telemetry(Base):
 
     # Fix quality — tells you whether to trust the coordinates
     accuracy_m: Mapped[float | None] = mapped_column(Float, nullable=True)
-    hdop: Mapped[int | None] = mapped_column(
+    hdop: Mapped[float | None] = mapped_column(
+        Float, nullable=True
+    )  # Changed from Integer to Float for values like 1.28
+    satellites: Mapped[int | None] = mapped_column(
         Integer, nullable=True
-    )  # <2 excellent, <5 good, >10 bad
+    )  # Added to track satellite count
     fix_quality: Mapped[int | None] = mapped_column(
         Integer, nullable=True
     )  # 0=no fix, 1=GPS, 2=DGPS

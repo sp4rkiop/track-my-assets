@@ -116,9 +116,12 @@ class MQTTService:
                     await db.flush()
                     is_new_device = True
 
-                # 2. Update Core Device Metadata (Syncing physical state)
+                # 2. Extract Extended Metadata
                 fw_ver = payload.get("fw_ver")
                 iccid = payload.get("iccid")
+                hw_mfg = payload.get("hw_mfg")
+                hw_model = payload.get("hw_model")
+                hw_rev = payload.get("hw_rev")
 
                 metadata_changed = False
                 if fw_ver and device.firmware_version != fw_ver:
@@ -136,7 +139,9 @@ class MQTTService:
                             imei=device.imei,
                             device_name=device.name,
                             fw_ver=device.firmware_version,
-                            iccid=device.sim_iccid,
+                            hw_mfg=hw_mfg,
+                            hw_model=hw_model,
+                            hw_rev=hw_rev,
                         )
                     )
 
@@ -207,6 +212,7 @@ class MQTTService:
                         heading_deg=payload.get("heading"),
                         accuracy_m=payload.get("accuracy"),
                         hdop=payload.get("hdop"),
+                        satellites=payload.get("gnss_sats"),
                         fix_quality=payload.get("fix_quality"),
                         gps_ttff=payload.get("ttff"),
                         rssi=payload.get("rssi"),
@@ -258,27 +264,26 @@ class MQTTService:
         imei: str,
         device_name: str,
         fw_ver: str | None = None,
-        iccid: str | None = None,
+        hw_mfg: str | None = None,
+        hw_model: str | None = None,
+        hw_rev: str | None = None,
     ):
         """Publishes Home Assistant Auto-Discovery configurations."""
         if cls._client is None:
             return
 
-        # 1. Base Device Info (Includes SW Version & Serial Number)
+        # 1. Dynamic Device Registry
         ha_device = {
             "identifiers": [f"tracker_{imei}"],
             "name": device_name,
-            "manufacturer": "Waveshare",
-            "model": "SIM7670G ESP32 Tracker",
+            "manufacturer": hw_mfg if hw_mfg else "Waveshare",
+            "model": hw_model if hw_model else "SIM7670G ESP32 Tracker",
         }
 
-        # Inject dynamic metadata so HA's device registry updates automatically
         if fw_ver:
             ha_device["sw_version"] = fw_ver
-        if iccid:
-            ha_device["hw_version"] = (
-                f"SIM ICCID: {iccid[-6:]}"  # Partial ICCID for security/brevity
-            )
+        if hw_rev:
+            ha_device["hw_version"] = hw_rev
 
         state_topic = f"trackers/{imei}/location"
 
@@ -291,7 +296,7 @@ class MQTTService:
             "has_entity_name": True,
             "unique_id": f"{imei}_tracker",
             "json_attributes_topic": state_topic,
-            "source_type": "gps",  # Forces HA to use latitude/longitude from JSON attributes
+            "source_type": "gps",
             "device": ha_device,
         }
 
@@ -313,7 +318,7 @@ class MQTTService:
             "has_entity_name": True,
             "unique_id": f"{imei}_voltage",
             "state_topic": state_topic,
-            "value_template": "{{ value_json.bat_v | float(0) }}",  # Cast to float
+            "value_template": "{{ value_json.bat_v | float(0) }}",
             "device_class": "voltage",
             "unit_of_measurement": "V",
             "suggested_display_precision": 2,
@@ -332,7 +337,7 @@ class MQTTService:
             "device": ha_device,
         }
 
-        # Event (e.g., BUMP, PERIODIC)
+        # Event
         configs["sensor_event"] = {
             "name": "Event",
             "has_entity_name": True,
@@ -343,14 +348,36 @@ class MQTTService:
             "device": ha_device,
         }
 
-        # Cellular Signal (Diagnostic Category)
+        # Cellular Signal
         configs["sensor_cellular"] = {
             "name": "Cellular CPSI",
             "unique_id": f"{imei}_cpsi",
             "state_topic": state_topic,
             "value_template": "{{ value_json.cpsi }}",
             "icon": "mdi:cellphone-wireless",
-            "entity_category": "diagnostic",  # Puts it in the "Diagnostics" section of HA
+            "entity_category": "diagnostic",
+            "device": ha_device,
+        }
+
+        # GNSS Satellites
+        configs["sensor_sats"] = {
+            "name": "Satellites",
+            "unique_id": f"{imei}_sats",
+            "state_topic": state_topic,
+            "value_template": "{{ value_json.gnss_sats }}",
+            "icon": "mdi:satellite-variant",
+            "entity_category": "diagnostic",
+            "device": ha_device,
+        }
+
+        # GNSS HDOP (Accuracy)
+        configs["sensor_hdop"] = {
+            "name": "HDOP",
+            "unique_id": f"{imei}_hdop",
+            "state_topic": state_topic,
+            "value_template": "{{ value_json.hdop }}",
+            "icon": "mdi:crosshairs-gps",
+            "entity_category": "diagnostic",
             "device": ha_device,
         }
 
@@ -360,7 +387,6 @@ class MQTTService:
             "has_entity_name": True,
             "unique_id": f"{imei}_motion",
             "state_topic": state_topic,
-            # If speed > 2kmh, it's ON (Moving), else OFF (Parked)
             "value_template": "{% if value_json.speed | float > 2.0 %}ON{% else %}OFF{% endif %}",
             "device_class": "moving",
             "device": ha_device,
@@ -368,41 +394,54 @@ class MQTTService:
 
         # Publish all configs
         try:
-            await cls._client.publish(
-                f"homeassistant/device_tracker/{imei}/config",
-                payload=json.dumps(configs["device_tracker"]),
-                retain=True,
-            )
-            await cls._client.publish(
-                f"homeassistant/sensor/{imei}_battery/config",
-                payload=json.dumps(configs["sensor_battery"]),
-                retain=True,
-            )
-            await cls._client.publish(
-                f"homeassistant/sensor/{imei}_voltage/config",
-                payload=json.dumps(configs["sensor_voltage"]),
-                retain=True,
-            )
-            await cls._client.publish(
-                f"homeassistant/sensor/{imei}_speed/config",
-                payload=json.dumps(configs["sensor_speed"]),
-                retain=True,
-            )
-            await cls._client.publish(
-                f"homeassistant/sensor/{imei}_event/config",
-                payload=json.dumps(configs["sensor_event"]),
-                retain=True,
-            )
-            await cls._client.publish(
-                f"homeassistant/sensor/{imei}_cellular/config",
-                payload=json.dumps(configs["sensor_cellular"]),
-                retain=True,
-            )
-            await cls._client.publish(
-                f"homeassistant/binary_sensor/{imei}_motion/config",
-                payload=json.dumps(configs["binary_sensor_motion"]),
-                retain=True,
-            )
+            publish_tasks = [
+                cls._client.publish(
+                    f"homeassistant/device_tracker/{imei}/config",
+                    payload=json.dumps(configs["device_tracker"]),
+                    retain=True,
+                ),
+                cls._client.publish(
+                    f"homeassistant/sensor/{imei}_battery/config",
+                    payload=json.dumps(configs["sensor_battery"]),
+                    retain=True,
+                ),
+                cls._client.publish(
+                    f"homeassistant/sensor/{imei}_voltage/config",
+                    payload=json.dumps(configs["sensor_voltage"]),
+                    retain=True,
+                ),
+                cls._client.publish(
+                    f"homeassistant/sensor/{imei}_speed/config",
+                    payload=json.dumps(configs["sensor_speed"]),
+                    retain=True,
+                ),
+                cls._client.publish(
+                    f"homeassistant/sensor/{imei}_event/config",
+                    payload=json.dumps(configs["sensor_event"]),
+                    retain=True,
+                ),
+                cls._client.publish(
+                    f"homeassistant/sensor/{imei}_cellular/config",
+                    payload=json.dumps(configs["sensor_cellular"]),
+                    retain=True,
+                ),
+                cls._client.publish(
+                    f"homeassistant/sensor/{imei}_sats/config",
+                    payload=json.dumps(configs["sensor_sats"]),
+                    retain=True,
+                ),
+                cls._client.publish(
+                    f"homeassistant/sensor/{imei}_hdop/config",
+                    payload=json.dumps(configs["sensor_hdop"]),
+                    retain=True,
+                ),
+                cls._client.publish(
+                    f"homeassistant/binary_sensor/{imei}_motion/config",
+                    payload=json.dumps(configs["binary_sensor_motion"]),
+                    retain=True,
+                ),
+            ]
+            await asyncio.gather(*publish_tasks)
 
             logger.info(
                 f"Published extended HA Auto-Discovery for {imei} (FW: {fw_ver})"
