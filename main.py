@@ -121,7 +121,6 @@ app.include_router(
     dependencies=[Depends(get_current_user)],
 )
 app.include_router(web_router)
-app.mount("/static", StaticFiles(directory="web/static"), name="static")
 
 
 @app.get("/health")
