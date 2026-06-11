@@ -1,15 +1,27 @@
-<div class="fade-in flex flex-col lg:flex-row gap-6 h-[calc(100vh-8rem)] relative">
+<style>
+    /* Inverts the map to dark mode, but rotates the hue 180 degrees 
+       so blue water stays blue, green parks stay green, and red roads stay red. */
+    .rich-dark-map-filter {
+        filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
+    }
+</style>
+
+<div
+    class="fade-in flex flex-col-reverse lg:flex-row w-full h-[calc(100dvh-60px)] lg:h-screen relative overflow-hidden bg-neutral-950">
 
     <div
-        class="w-full lg:w-1/3 flex flex-col bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden shadow-sm z-10">
-        <div class="p-5 border-b border-neutral-800 bg-neutral-900/80 space-y-4">
+        class="w-full lg:w-[380px] flex flex-col bg-neutral-900 border-t lg:border-t-0 lg:border-r border-neutral-800 z-10 h-[45dvh] lg:h-full shrink-0 shadow-[0_-10px_30px_-10px_rgba(0,0,0,0.5)] lg:shadow-2xl drop-shadow-xl relative">
+
+        <div class="p-5 border-b border-neutral-800 bg-neutral-900/80 sm:space-y-4 shrink-0">
             <div>
                 <h2 class="text-xl font-bold text-neutral-100">Historical Trips</h2>
-                <p class="text-sm text-neutral-400 mt-1">Select a route to visualize the telemetry path.</p>
+                <p class="text-sm text-neutral-400 mt-1 hidden sm:block">Select a device to visualize the telemetry
+                    path.</p>
             </div>
 
             <div>
-                <label class="block text-xs font-medium text-neutral-500 uppercase tracking-wider mb-1.5">Active
+                <label
+                    class="block text-xs font-medium text-neutral-500 text-right sm:text-left uppercase tracking-wider mb-1.5">Selected
                     Tracker</label>
                 <select id="device-select" onchange="changeDevice(this.value)"
                     class="w-full bg-neutral-950 border border-neutral-700 rounded-lg p-2.5 text-sm text-neutral-200 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none transition-all cursor-pointer">
@@ -24,7 +36,7 @@
             </div>
         </div>
 
-        <div id="trips-list" class="flex-1 overflow-y-auto p-3 space-y-3 relative">
+        <div id="trips-list" class="flex-1 overflow-y-auto p-3 space-y-3 relative bg-neutral-900/50">
             <div id="trips-loading" class="animate-pulse flex flex-col space-y-3">
                 <div class="h-20 bg-neutral-800/50 rounded-lg"></div>
                 <div class="h-20 bg-neutral-800/50 rounded-lg"></div>
@@ -34,9 +46,8 @@
         </div>
     </div>
 
-    <div
-        class="w-full lg:w-2/3 bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden relative shadow-sm min-h-[400px] lg:min-h-0 z-0">
-        <div id="map" class="w-full h-full z-0 bg-neutral-950"></div>
+    <div class="flex-1 relative z-0 min-h-0 bg-neutral-950">
+        <div id="map" class="w-full h-full z-0"></div>
 
         <div id="map-loader"
             class="hidden absolute inset-0 bg-neutral-950/60 z-[400] flex items-center justify-center backdrop-blur-sm transition-opacity">
@@ -61,69 +72,129 @@
 </div>
 
 <script>
+    // --- 0. UI Full Bleed Layout Override ---
+    (function () {
+        const main = document.getElementById('main-content');
+        if (main && !main.classList.contains('max-w-full')) {
+            main.classList.remove('max-w-7xl', 'p-4', 'md:p-8');
+            main.classList.add('max-w-full', 'p-0');
+
+            const cleanup = (e) => {
+                if (e.detail.target.id === 'main-content') {
+                    main.classList.add('max-w-7xl', 'p-4', 'md:p-8');
+                    main.classList.remove('max-w-full', 'p-0');
+                    document.body.removeEventListener('htmx:beforeSwap', cleanup);
+                }
+            };
+            document.body.addEventListener('htmx:beforeSwap', cleanup);
+        }
+    })();
+
     // 1. Initialize Global State
     var tripMap;
     var tripRouteLayerGroup;
     var currentDeviceId = document.getElementById('device-select') ? document.getElementById('device-select').value : null;
-
-    // Map Base Layers
-    var darkLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-        subdomains: 'abcd',
-        maxZoom: 20
-    });
-
-    var streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap contributors',
-        maxZoom: 19
-    });
-
-    var satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-        attribution: 'Tiles &copy; Esri',
-        maxZoom: 19
-    });
-
     var themeObserver;
 
+    // --- TILE LAYERS DEFINITION ---
+
+    // Light Maps
+    var osmLightLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap', maxZoom: 19
+    });
+
+    var esriStreetLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles &copy; Esri', maxZoom: 19
+    });
+
+    var topoLayer = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenTopoMap', maxZoom: 17
+    });
+
+    // Dark Maps (Utilizing CSS Filter Trick for Rich Colors)
+    var osmDarkRichLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap', maxZoom: 19, className: 'rich-dark-map-filter'
+    });
+
+    var esriStreetDarkRichLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles &copy; Esri', maxZoom: 19, className: 'rich-dark-map-filter'
+    });
+
+    var cartoDarkMutedLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; CARTO', subdomains: 'abcd', maxZoom: 20
+    });
+
+    // Specialty Maps
+    var satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles &copy; Esri', maxZoom: 19
+    });
+
+    function getMapCenterByTimezone() {
+        // Fallback to browser's native timezone if custom window var isn't set yet
+        const tz = window.userTimezone || Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+        const regions = {
+            'Asia/Kolkata': { lat: 22.9734, lng: 78.6569, zoom: 5 }, // India
+            'America/': { lat: 39.8283, lng: -98.5795, zoom: 4 }, // USA/North America
+            'Europe/': { lat: 54.5260, lng: 15.2551, zoom: 4 }, // Europe
+            'Australia/': { lat: -25.2744, lng: 133.7751, zoom: 4 }, // Australia
+            'Africa/': { lat: -8.7832, lng: 34.5085, zoom: 3 }, // Africa
+        };
+
+        if (tz === 'Asia/Kolkata') return regions['Asia/Kolkata'];
+
+        // Match prefix for broad continent defaulting
+        for (const [prefix, config] of Object.entries(regions)) {
+            if (tz.startsWith(prefix)) return config;
+        }
+
+        // Generic fallback center if timezone is unknown
+        return { lat: 0.000, lng: 0.000, zoom: 1 };
+    }
+
     function initMap() {
-        // If HTMX swapped the DOM, we must properly destroy the old Leaflet map instance
         if (tripMap !== undefined && tripMap !== null) {
             tripMap.remove();
         }
 
         const isDark = document.documentElement.classList.contains('dark');
+        const defaultCenter = getMapCenterByTimezone();
 
         tripMap = L.map('map', {
             zoomControl: false,
-            layers: [isDark ? darkLayer : streetLayer] // Set initial layer based on theme
-        }).setView([23.804, 86.427], 13);
+            layers: [!isDark ? osmDarkRichLayer : osmLightLayer]
+        }).setView([defaultCenter.lat, defaultCenter.lng], defaultCenter.zoom);
 
         L.control.zoom({ position: 'bottomright' }).addTo(tripMap);
 
-        // Add Layer Control to top right
         const baseMaps = {
-            "High-Detail Street": streetLayer,
-            "Dark Mode": darkLayer,
-            "Satellite Vision": satelliteLayer
+            "OSM Rich (Dark Mode)": osmDarkRichLayer,
+            "Esri Street (Dark Mode)": esriStreetDarkRichLayer,
+            "CartoDB Muted (Dark Mode)": cartoDarkMutedLayer,
+            "Esri Street (Light Mode)": esriStreetLayer,
+            "OSM Standard (Light Mode)": osmLightLayer,
+            "OpenTopoMap (Trails/Dirt)": topoLayer,
+            "Esri Satellite Vision": satelliteLayer
         };
         L.control.layers(baseMaps, null, { position: 'topright' }).addTo(tripMap);
 
         tripRouteLayerGroup = L.layerGroup().addTo(tripMap);
-        setTimeout(() => tripMap.invalidateSize(), 100);
 
-        // Hook up the Auto-Theme Sync Observer
+        setTimeout(() => tripMap.invalidateSize(), 50);
+        setTimeout(() => tripMap.invalidateSize(), 300);
+
         if (themeObserver) themeObserver.disconnect();
         themeObserver = new MutationObserver((mutations) => {
             mutations.forEach((mutation) => {
                 if (mutation.attributeName === 'class') {
                     const darkActive = document.documentElement.classList.contains('dark');
-                    // Only auto-swap if they are currently using one of the default theme layers
-                    if (darkActive && tripMap.hasLayer(streetLayer)) {
-                        tripMap.removeLayer(streetLayer);
-                        tripMap.addLayer(darkLayer);
-                    } else if (!darkActive && tripMap.hasLayer(darkLayer)) {
-                        tripMap.removeLayer(darkLayer);
-                        tripMap.addLayer(streetLayer);
+
+                    // Smart Theme Toggling based on active layer
+                    if (darkActive) {
+                        if (tripMap.hasLayer(osmLightLayer)) { tripMap.removeLayer(osmLightLayer); tripMap.addLayer(osmDarkRichLayer); }
+                        if (tripMap.hasLayer(esriStreetLayer)) { tripMap.removeLayer(esriStreetLayer); tripMap.addLayer(esriStreetDarkRichLayer); }
+                    } else {
+                        if (tripMap.hasLayer(osmDarkRichLayer)) { tripMap.removeLayer(osmDarkRichLayer); tripMap.addLayer(osmLightLayer); }
+                        if (tripMap.hasLayer(esriStreetDarkRichLayer)) { tripMap.removeLayer(esriStreetDarkRichLayer); tripMap.addLayer(esriStreetLayer); }
                     }
                 }
             });
@@ -131,11 +202,12 @@
         themeObserver.observe(document.documentElement, { attributes: true });
     }
 
-    // 2. Clipboard Toast System
+    // 2. Robust Clipboard Toast System
     var toastTimeout;
     function copyCoordinate(lat, lng) {
         const coordString = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-        navigator.clipboard.writeText(coordString).then(() => {
+
+        const triggerToast = () => {
             const toast = document.getElementById('clipboard-toast');
             document.getElementById('toast-msg').innerText = `Copied: ${coordString}`;
             toast.classList.remove('translate-y-20', 'opacity-0');
@@ -146,15 +218,38 @@
                 toast.classList.remove('translate-y-0', 'opacity-100');
                 toast.classList.add('translate-y-20', 'opacity-0');
             }, 3000);
-        });
+        };
+
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(coordString).then(triggerToast).catch(e => console.error(e));
+        } else {
+            const textArea = document.createElement("textarea");
+            textArea.value = coordString;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-999999px";
+            textArea.style.top = "-999999px";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                triggerToast();
+            } catch (err) {
+                console.error('Fallback clipboard failed', err);
+            }
+            textArea.remove();
+        }
     }
 
     // 3. Handle Device Switching
+    var currentSkip = 0;
+    var limit = 20;
+
     function changeDevice(newDeviceId) {
         if (!newDeviceId) return;
         currentDeviceId = newDeviceId;
+        currentSkip = 0;
 
-        // Reset UI state for new device
         tripRouteLayerGroup.clearLayers();
         document.getElementById('trips-content').innerHTML = "";
         document.getElementById('trips-loading').style.display = "flex";
@@ -164,30 +259,38 @@
 
     // 4. Fetch and Render the Trips List
     async function loadTrips() {
-        if (!currentDeviceId) return;
+        const loader = document.getElementById('trips-loading');
+        const contentContainer = document.getElementById('trips-content');
+
+        if (!currentDeviceId) {
+            if (loader) loader.style.display = 'none';
+            contentContainer.innerHTML = `<div class="text-center p-6 text-neutral-500">No trackers registered.</div>`;
+            return;
+        }
 
         try {
-            const response = await fetch(`/api/v1/trips/devices/${currentDeviceId}/trips?limit=20`);
+            const response = await fetch(`/api/v1/trips/devices/${currentDeviceId}/trips?skip=${currentSkip}&limit=${limit}`);
             if (!response.ok) throw new Error("Failed to fetch trips");
 
             const data = await response.json();
-            const contentContainer = document.getElementById('trips-content');
-            document.getElementById('trips-loading').style.display = 'none';
 
-            if (data.trips.length === 0) {
+            if (loader) loader.style.display = 'none';
+
+            if (data.trips.length === 0 && currentSkip === 0) {
                 contentContainer.innerHTML = `<div class="text-center p-6 text-neutral-500">No trips recorded yet.</div>`;
                 return;
             }
 
             let html = "";
+            const userTz = window.userTimezone || 'UTC';
             data.trips.forEach(trip => {
-                const startTime = new Date(trip.start_time).toLocaleString(undefined, {
-                    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-                });
+                const startTime = userTz === 'UTC'
+                    ? new Date(trip.start_time).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' UTC'
+                    : new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: userTz }).format(new Date(trip.start_time));
                 const tripGroupId = trip.trip_id.split('_').pop();
 
                 html += `
-                    <div onclick="loadRoute('${tripGroupId}', this)" 
+                    <div onclick="loadRoute('${tripGroupId}', this)"
                          class="trip-card group cursor-pointer py-2.5 px-3.5 rounded-lg border border-neutral-800 bg-neutral-950 hover:bg-neutral-800/80 hover:border-amber-500/50 transition-all">
                         <div class="flex justify-between items-center">
                             <div class="flex flex-col">
@@ -202,21 +305,45 @@
                                 <span class="text-[10px] bg-neutral-900 border border-neutral-800 text-neutral-400 px-1.5 py-0.5 rounded font-mono-data">
                                     ${trip.data_points} pts
                                 </span>
-                                <span class="text-[10px] text-neutral-600 mt-1 opacity-0 group-hover:opacity-100 transition-opacity font-medium">
-                                    Map Route &rarr;
-                                </span>
+                                <span class="text-[10px] text-neutral-600 mt-1 opacity-0 group-hover:opacity-100 transition-opacity font-medium">Map Route &rarr;</span>
                             </div>
                         </div>
                     </div>
                 `;
             });
-            contentContainer.innerHTML = html;
+
+            const existingBtn = document.getElementById('load-more-trips-btn');
+            if (existingBtn) existingBtn.remove();
+
+            if (data.trips.length === limit) {
+                html += `
+                    <button id="load-more-trips-btn" onclick="loadMoreTrips()" 
+                        class="w-full py-2.5 mt-2 text-xs font-semibold text-amber-500/70 border border-amber-500/30 rounded-lg hover:bg-amber-500/10 hover:text-amber-500 transition-colors font-mono-data uppercase tracking-widest outline-none">
+                        Load Older Trips &darr;
+                    </button>
+                `;
+            }
+
+            if (currentSkip === 0) {
+                contentContainer.innerHTML = html;
+            } else {
+                contentContainer.insertAdjacentHTML('beforeend', html);
+            }
 
         } catch (error) {
             console.error(error);
-            document.getElementById('trips-content').innerHTML = `<div class="text-center p-6 text-red-400">Failed to load trips. Check console.</div>`;
-            document.getElementById('trips-loading').style.display = 'none';
+            if (loader) loader.style.display = 'none';
+            if (currentSkip === 0) {
+                contentContainer.innerHTML = `<div class="text-center p-6 text-red-400">Failed to load trips. Check console.</div>`;
+            }
         }
+    }
+
+    function loadMoreTrips() {
+        currentSkip += limit;
+        const btn = document.getElementById('load-more-trips-btn');
+        if (btn) btn.innerHTML = '<span class="animate-pulse">LOADING...</span>';
+        loadTrips();
     }
 
     // 5. Fetch and Draw the Polyline
@@ -235,21 +362,17 @@
 
             tripRouteLayerGroup.clearLayers();
 
-            // Store raw Leaflet LatLng objects to enable precision distance calculations
             const rawPoints = data.path.map(pt => L.latLng(pt.lat, pt.lng));
             if (rawPoints.length === 0) throw new Error("No path data");
 
-            // Outer Glow
-            L.polyline(rawPoints, { color: '#f59e0b', weight: 12, opacity: 0.2, lineCap: 'round', lineJoin: 'round' }).addTo(tripRouteLayerGroup);
+            L.polyline(rawPoints, { color: '#f59e0b', weight: 16, opacity: 0.2, lineCap: 'round', lineJoin: 'round', className: 'cursor-pointer' }).addTo(tripRouteLayerGroup);
 
-            // Inner Interactive Core
             const coreLine = L.polyline(rawPoints, { color: '#fbbf24', weight: 4, opacity: 1.0, lineCap: 'round', lineJoin: 'round', className: 'cursor-pointer' }).addTo(tripRouteLayerGroup);
 
-            // Add tooltip to let users know it is interactive
-            coreLine.bindTooltip("Click to copy exact coordinate", { sticky: true, className: "font-mono-data text-xs bg-neutral-900 text-neutral-200 border-neutral-700" });
+            const tooltipConfig = { sticky: true, className: "font-mono-data text-xs bg-neutral-900 text-neutral-200 border-neutral-700" };
+            coreLine.bindTooltip("Click to copy exact coordinate", tooltipConfig);
 
-            // On click, calculate the exact closest telemetry point (avoids pixel interpolation drift)
-            coreLine.on('click', function (e) {
+            const handleLineClick = function (e) {
                 let closestPt = rawPoints[0];
                 let minDist = e.latlng.distanceTo(closestPt);
                 for (let i = 1; i < rawPoints.length; i++) {
@@ -260,17 +383,18 @@
                     }
                 }
                 copyCoordinate(closestPt.lat, closestPt.lng);
-            });
+            };
 
-            // Start & End Markers (also copyable)
+            coreLine.on('click', handleLineClick);
+
             const startPt = rawPoints[0];
             const endPt = rawPoints[rawPoints.length - 1];
 
-            const startMarker = L.circleMarker(startPt, { radius: 6, fillColor: '#10b981', color: '#059669', weight: 2, fillOpacity: 1, className: 'cursor-pointer' }).addTo(tripRouteLayerGroup);
+            const startMarker = L.circleMarker(startPt, { radius: 8, fillColor: '#10b981', color: '#059669', weight: 4, fillOpacity: 1, className: 'cursor-pointer' }).addTo(tripRouteLayerGroup);
             startMarker.bindTooltip("Start Point (Click to copy)", { direction: 'top', className: "font-mono-data text-xs" });
             startMarker.on('click', () => copyCoordinate(startPt.lat, startPt.lng));
 
-            const endMarker = L.circleMarker(endPt, { radius: 6, fillColor: '#ef4444', color: '#b91c1c', weight: 2, fillOpacity: 1, className: 'cursor-pointer' }).addTo(tripRouteLayerGroup);
+            const endMarker = L.circleMarker(endPt, { radius: 8, fillColor: '#ef4444', color: '#b91c1c', weight: 4, fillOpacity: 1, className: 'cursor-pointer' }).addTo(tripRouteLayerGroup);
             endMarker.bindTooltip("End Point (Click to copy)", { direction: 'top', className: "font-mono-data text-xs" });
             endMarker.on('click', () => copyCoordinate(endPt.lat, endPt.lng));
 
@@ -284,9 +408,12 @@
         }
     }
 
-    // Execute when HTMX swaps this content in
     initMap();
     if (currentDeviceId) {
         loadTrips();
     }
+
+    window.addEventListener('timezoneChanged', () => {
+        if (currentDeviceId) loadTrips();
+    });
 </script>

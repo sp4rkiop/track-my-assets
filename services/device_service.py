@@ -24,3 +24,24 @@ class DeviceService:
         )
         result = await db.execute(query)
         return result.scalars().all()
+
+    @staticmethod
+    async def update_device_name(
+        db: AsyncSession, device_id: str, new_name: str
+    ) -> Device | None:
+        device = await db.scalar(select(Device).where(Device.id == device_id))
+        if device:
+            device.name = new_name
+            db.add(device)
+            await db.commit()
+            await db.refresh(device)
+        return device
+
+    @staticmethod
+    async def delete_device(db: AsyncSession, device_id: str) -> bool:
+        device = await db.scalar(select(Device).where(Device.id == device_id))
+        if device:
+            await db.delete(device)
+            await db.commit()
+            return True
+        return False

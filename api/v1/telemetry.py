@@ -23,11 +23,11 @@ async def get_latest_telemetry(imei: str, db: AsyncSession = Depends(get_db)):
 
 @router.get("/{imei}/history", response_model=list[TelemetryRead])
 async def get_telemetry_history(
-    imei: str, limit: int = 50, db: AsyncSession = Depends(get_db)
+    imei: str, skip: int = 0, limit: int = 50, db: AsyncSession = Depends(get_db)
 ):
     device = await DeviceService.get_by_imei(db, imei)
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
-    history = await TelemetryService.get_history(db, device.id, limit)
+    history = await TelemetryService.get_history(db, device.id, skip, limit)
     return [TelemetryRead.from_orm_model(h) for h in history]

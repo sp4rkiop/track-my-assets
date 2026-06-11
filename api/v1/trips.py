@@ -7,12 +7,12 @@ router = APIRouter()
 
 
 @router.get("/devices/{device_id}/trips")
-async def get_device_trips(device_id: uuid.UUID, limit: int = 20):
+async def get_device_trips(device_id: uuid.UUID, skip: int = 0, limit: int = 20):
     """
     Returns a list of segmented trips for a specific device.
     """
     async with PostgreSQLDatabase.get_session() as db:
-        trips = await TripService.get_device_trips(db, device_id, limit)
+        trips = await TripService.get_device_trips(db, device_id, skip, limit)
         return {"device_id": str(device_id), "trips": trips}
 
 

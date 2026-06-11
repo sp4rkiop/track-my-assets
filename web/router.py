@@ -101,9 +101,7 @@ async def get_devices_partial(
                     "name": d.name,
                     "imei": d.imei,
                     "firmware": d.firmware_version or "Unknown",
-                    "last_seen": d.last_seen.strftime("%b %d, %H:%M:%S")
-                    if d.last_seen
-                    else "Never",
+                    "last_seen": d.last_seen.isoformat() if d.last_seen else None,
                     "is_online": is_online,
                 }
             )
@@ -119,18 +117,53 @@ async def get_devices_partial(
 async def get_device_telemetry(
     request: Request,
     device_id: str,
+    skip: int = 0,
+    limit: int = 50,
     current_user: User = Depends(get_current_active_user),
 ):
-    """HTMX partial that returns the telemetry table for the modal."""
+    """HTMX partial that returns the telemetry table with pagination."""
     async with PostgreSQLDatabase.get_session() as db:
-        # Fetch the latest 50 telemetry points for this device
-        telemetry_data = await TelemetryService.get_history(db, device_id, 50)
+        telemetry_data = await TelemetryService.get_history(
+            db, device_id, skip=skip, limit=limit
+        )
 
     return templates.TemplateResponse(
         request=request,
         name="devices/telemetry_table.html",
-        context={"telemetry": telemetry_data},
+        context={
+            "telemetry": telemetry_data,
+            "device_id": device_id,
+            "skip": skip,
+            "limit": limit,
+        },
     )
+
+
+@web_router.post("/devices/{device_id}/edit", response_class=HTMLResponse)
+async def edit_device_name(
+    request: Request,
+    device_id: str,
+    name: str = Form(...),
+    current_user: User = Depends(get_current_active_user),
+):
+    """HTMX endpoint to update device name."""
+    async with PostgreSQLDatabase.get_session() as db:
+        await DeviceService.update_device_name(db, device_id, name)
+
+    return await get_devices_partial(request)
+
+
+@web_router.delete("/devices/{device_id}", response_class=HTMLResponse)
+async def delete_device_node(
+    request: Request,
+    device_id: str,
+    current_user: User = Depends(get_current_active_user),
+):
+    """HTMX endpoint to delete a device."""
+    async with PostgreSQLDatabase.get_session() as db:
+        await DeviceService.delete_device(db, device_id)
+
+    return await get_devices_partial(request)
 
 
 @web_router.get("/ota", response_class=HTMLResponse)
@@ -152,15 +185,33 @@ async def get_ota_partial(
 
 @web_router.get("/ota/jobs", response_class=HTMLResponse)
 async def get_ota_jobs_table(
-    request: Request, current_user: User = Depends(get_current_active_user)
+    request: Request,
+    skip: int = 0,
+    limit: int = 20,
+    current_user: User = Depends(get_current_active_user),
 ):
-    """HTMX Polling Endpoint for the Jobs Table."""
+    """HTMX Polling & Pagination Endpoint for the Jobs Table."""
     async with PostgreSQLDatabase.get_session() as db:
-        jobs = await OtaService.get_recent_jobs(db)
+        jobs = await OtaService.get_recent_jobs(db, skip=skip, limit=limit)
 
     return templates.TemplateResponse(
-        request=request, name="ota/jobs_table.html", context={"jobs": jobs}
+        request=request,
+        name="ota/jobs_table.html",
+        context={"jobs": jobs, "skip": skip, "limit": limit},
     )
+
+
+@web_router.delete("/ota/jobs/{job_id}", response_class=HTMLResponse)
+async def delete_ota_job(
+    request: Request, job_id: str, current_user: User = Depends(get_current_active_user)
+):
+    """HTMX endpoint to delete an active or completed OTA job."""
+    async with PostgreSQLDatabase.get_session() as db:
+        await OtaService.delete_job(db, job_id)
+
+    # Return an empty response. HTMX uses this to instantly remove the deleted
+    # <tr> from the DOM without resetting the user's paginated list.
+    return HTMLResponse("")
 
 
 @web_router.post("/ota/canary", response_class=HTMLResponse)

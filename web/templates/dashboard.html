@@ -8,36 +8,42 @@
             nodes.</p>
     </div>
 
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 font-mono-data">
-        <div class="bg-neutral-900 border border-neutral-800 rounded-xl p-5 shadow-sm">
-            <div class="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Fleet Nodes</div>
-            <div class="text-3xl font-bold mt-2 text-neutral-100">{{ metrics.total_devices }}</div>
-            <div class="text-xs text-neutral-500 mt-1">Total registered trackers</div>
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6 font-mono-data">
+        <div class="bg-neutral-900 border border-neutral-800 rounded-xl p-4 md:p-5 shadow-sm">
+            <div class="text-[10px] md:text-xs font-semibold text-neutral-500 uppercase tracking-wider truncate">Fleet
+                Nodes</div>
+            <div class="text-xl md:text-3xl font-bold mt-1.5 md:mt-2 text-neutral-100">{{ metrics.total_devices }}</div>
+            <div class="text-[9px] md:text-xs text-neutral-500 mt-1 truncate">Registered trackers</div>
         </div>
 
-        <div class="bg-neutral-900 border border-neutral-800 rounded-xl p-5 shadow-sm">
-            <div class="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Active Stream</div>
-            <div class="text-3xl font-bold mt-2 text-emerald-400 flex items-center space-x-2">
+        <div class="bg-neutral-900 border border-neutral-800 rounded-xl p-4 md:p-5 shadow-sm">
+            <div class="text-[10px] md:text-xs font-semibold text-neutral-500 uppercase tracking-wider truncate">Active
+                Stream</div>
+            <div class="text-xl md:text-3xl font-bold mt-1.5 md:mt-2 text-emerald-400 flex items-center space-x-2">
                 <span>{{ metrics.online_devices }}</span>
-                <span class="flex h-2 w-2 relative">
+                <span class="flex h-2 w-2 relative shrink-0">
                     <span
                         class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                     <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                 </span>
             </div>
-            <div class="text-xs text-neutral-500 mt-1">Active nodes reporting coordinates</div>
+            <div class="text-[9px] md:text-xs text-neutral-500 mt-1 truncate">Reporting coordinates</div>
         </div>
 
-        <div class="bg-neutral-900 border border-neutral-800 rounded-xl p-5 shadow-sm">
-            <div class="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Target Firmware</div>
-            <div class="text-3xl font-bold mt-2 text-amber-500">{{ metrics.latest_firmware }}</div>
-            <div class="text-xs text-neutral-500 mt-1">Latest verified compiled release</div>
+        <div class="bg-neutral-900 border border-neutral-800 rounded-xl p-4 md:p-5 shadow-sm">
+            <div class="text-[10px] md:text-xs font-semibold text-neutral-500 uppercase tracking-wider truncate">Target
+                Firmware</div>
+            <div class="text-xl md:text-3xl font-bold mt-1.5 md:mt-2 text-amber-500 truncate">{{ metrics.latest_firmware
+                }}</div>
+            <div class="text-[9px] md:text-xs text-neutral-500 mt-1 truncate">Latest verified build</div>
         </div>
 
-        <div class="bg-neutral-900 border border-neutral-800 rounded-xl p-5 shadow-sm">
-            <div class="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Active Deployments</div>
-            <div class="text-3xl font-bold mt-2 text-neutral-100">{{ metrics.recent_jobs_count }}</div>
-            <div class="text-xs text-neutral-500 mt-1">Tracked installation loops</div>
+        <div class="bg-neutral-900 border border-neutral-800 rounded-xl p-4 md:p-5 shadow-sm">
+            <div class="text-[10px] md:text-xs font-semibold text-neutral-500 uppercase tracking-wider truncate">
+                Deployments</div>
+            <div class="text-xl md:text-3xl font-bold mt-1.5 md:mt-2 text-neutral-100">{{ metrics.recent_jobs_count }}
+            </div>
+            <div class="text-[9px] md:text-xs text-neutral-500 mt-1 truncate">Tracked install loops</div>
         </div>
     </div>
 
@@ -59,8 +65,8 @@
                     class="bg-neutral-950/40 text-xs uppercase text-neutral-500 border-b border-neutral-800 font-mono-data">
                     <tr>
                         <th class="px-6 py-3.5">Device Target</th>
-                        <th class="px-6 py-3.5">Target Build</th>
-                        <th class="px-6 py-3.5">Deployment State</th>
+                        <th class="px-6 py-3.5">Target Version</th>
+                        <th class="px-6 py-3.5">Status</th>
                         <th class="px-6 py-3.5 text-right">Triggered</th>
                     </tr>
                 </thead>
@@ -100,7 +106,7 @@
                             {% endif %}
                         </td>
                         <td class="px-6 py-4 text-right text-xs text-neutral-500 font-mono-data">
-                            {{ job.created_at.strftime('%b %d, %H:%M') }}
+                            <span data-utc="{{ job.created_at.isoformat() }}"></span>
                         </td>
                     </tr>
                     {% else %}

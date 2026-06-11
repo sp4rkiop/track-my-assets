@@ -51,23 +51,40 @@ class OtaService:
         return db_job
 
     @staticmethod
+    async def delete_job(db: AsyncSession, job_id: str) -> bool:
+        """Deletes an OTA job from the database."""
+        # Using UUID explicitly in case the string needs casting, but SQLAlchemy usually handles it
+        result = await db.execute(select(OtaJob).where(OtaJob.id == job_id))
+        job = result.scalar_one_or_none()
+
+        if job:
+            await db.delete(job)
+            await db.commit()
+            return True
+        return False
+
+    @staticmethod
     async def get_release_by_id(db: AsyncSession, release_id) -> OtaRelease | None:
         result = await db.execute(select(OtaRelease).where(OtaRelease.id == release_id))
         return result.scalar_one_or_none()
 
     @staticmethod
-    async def get_all_releases(db: AsyncSession, limit: int = 10):
+    async def get_all_releases(db: AsyncSession, skip: int = 0, limit: int = 20):
         result = await db.execute(
-            select(OtaRelease).order_by(OtaRelease.released_at.desc()).limit(limit)
+            select(OtaRelease)
+            .order_by(OtaRelease.released_at.desc())
+            .offset(skip)
+            .limit(limit)
         )
         return result.scalars().all()
 
     @staticmethod
-    async def get_recent_jobs(db: AsyncSession, limit: int = 20):
+    async def get_recent_jobs(db: AsyncSession, skip: int = 0, limit: int = 20):
         result = await db.execute(
             select(OtaJob)
             .options(joinedload(OtaJob.device), joinedload(OtaJob.release))
             .order_by(OtaJob.created_at.desc())
+            .offset(skip)
             .limit(limit)
         )
         return result.scalars().all()

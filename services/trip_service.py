@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 class TripService:
     @staticmethod
     async def get_device_trips(
-        db: AsyncSession, device_id: uuid.UUID, limit: int = 20
+        db: AsyncSession, device_id: uuid.UUID, skip: int = 0, limit: int = 20
     ) -> list[dict]:
         """
         Uses PostgreSQL Window Functions to dynamically group telemetry points into trips.
@@ -55,10 +55,13 @@ class TripService:
             GROUP BY trip_group_id
             HAVING COUNT(*) > 2  -- Filter out noise (trips with only 1 or 2 points)
             ORDER BY start_time DESC
+            OFFSET :skip
             LIMIT :limit;
         """)
 
-        result = await db.execute(query, {"device_id": device_id, "limit": limit})
+        result = await db.execute(
+            query, {"device_id": device_id, "skip": skip, "limit": limit}
+        )
         rows = result.fetchall()
 
         trips = []

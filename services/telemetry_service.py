@@ -15,11 +15,12 @@ class TelemetryService:
         return result.scalar_one_or_none()
 
     @staticmethod
-    async def get_history(db: AsyncSession, device_id, limit: int = 50):
+    async def get_history(db: AsyncSession, device_id, skip: int = 0, limit: int = 50):
         result = await db.execute(
             select(Telemetry)
             .where(Telemetry.device_id == device_id)
             .order_by(Telemetry.device_ts.desc())
+            .offset(skip)
             .limit(limit)
         )
         return result.scalars().all()
