@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-neutral-950 text-neutral-100 dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Authentication - Fleet//OS</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+        rel="stylesheet">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+        }
+
+        .font-mono-data {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .fade-in {
+            animation: fadeIn 0.4s ease-out forwards;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+
+<body class="h-full flex items-center justify-center p-4">
+
+    <main class="w-full max-w-md bg-neutral-900 border border-neutral-800 rounded-2xl p-8 shadow-2xl fade-in">
+
+        <div class="text-center mb-8">
+            <div class="text-amber-500 font-bold tracking-widest text-2xl font-mono-data mb-2">FLEET // OS</div>
+            <h1 class="text-lg font-semibold text-neutral-200">System Authentication</h1>
+            <p class="text-sm text-neutral-500 mt-1">Provide credentials to access the control center.</p>
+        </div>
+
+        <form hx-post="/api/v1/auth/login" hx-swap="none" id="loginForm" class="space-y-5">
+
+            <div>
+                <label class="block text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-2">Email
+                    Identity</label>
+                <input type="email" name="username" placeholder="admin@example.com" required
+                    class="w-full bg-neutral-950 border border-neutral-800 text-neutral-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-colors font-mono-data placeholder-neutral-700">
+            </div>
+
+            <div>
+                <label class="block text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-2">Access
+                    Key</label>
+                <input type="password" name="password" placeholder="••••••••" required
+                    class="w-full bg-neutral-950 border border-neutral-800 text-neutral-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-colors font-mono-data placeholder-neutral-700">
+            </div>
+
+            <button type="submit"
+                class="w-full bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold py-3 rounded-lg transition-colors mt-2 text-sm tracking-wide">
+                INITIATE HANDSHAKE &rarr;
+            </button>
+
+            <div id="login-error" class="hidden mt-4 bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-center">
+                <span class="text-xs font-medium text-red-400 font-mono-data uppercase tracking-wider">ERR: Invalid
+                    Credentials</span>
+            </div>
+        </form>
+
+        <script>
+            // Listen for 401 Unauthorized from HTMX
+            document.body.addEventListener('htmx:responseError', function (evt) {
+                if (evt.detail.xhr.status === 401) {
+                    const errorBox = document.getElementById('login-error');
+                    errorBox.classList.remove('hidden');
+                    // Shake animation for error
+                    errorBox.animate([
+                        { transform: 'translateX(0)' },
+                        { transform: 'translateX(-5px)' },
+                        { transform: 'translateX(5px)' },
+                        { transform: 'translateX(-5px)' },
+                        { transform: 'translateX(5px)' },
+                        { transform: 'translateX(0)' }
+                    ], { duration: 400, easing: 'ease-in-out' });
+                }
+            });
+        </script>
+    </main>
+
+</body>
+
+</html>

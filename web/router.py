@@ -1,11 +1,13 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Request, Form
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, Request, Form
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 import pathlib
 
 from core.database import PostgreSQLDatabase
+from core.deps import get_current_active_user, get_current_user
+from models.user import User
 from services.device_service import DeviceService
 from services.ota_service import OtaService
 from services.telemetry_service import TelemetryService
@@ -17,8 +19,28 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 web_router = APIRouter(prefix="/web", tags=["Frontend"])
 
 
+@web_router.get("/login", response_class=HTMLResponse)
+async def get_login_page(request: Request):
+    """Render your login template here."""
+    return templates.TemplateResponse(request=request, name="auth/login.html")
+
+
+@web_router.get("/setup-password", response_class=HTMLResponse)
+async def get_setup_password_page(
+    request: Request,
+    current_user: User = Depends(get_current_user),  # Only requires basic login
+):
+    # If they hit this URL manually but are already set up, bounce them to the dashboard
+    if not current_user.needs_password_change:
+        return RedirectResponse(url="/web/", status_code=303)
+
+    return templates.TemplateResponse(request=request, name="auth/setup_password.html")
+
+
 @web_router.get("/", response_class=HTMLResponse)
-async def get_dashboard_home(request: Request):
+async def get_dashboard_home(
+    request: Request, current_user: User = Depends(get_current_active_user)
+):
     """Renders the comprehensive production system metrics overview dashboard."""
     async with PostgreSQLDatabase.get_session() as db:
         # Fetch actual metrics via domain services
@@ -56,7 +78,9 @@ async def get_dashboard_home(request: Request):
 
 
 @web_router.get("/devices", response_class=HTMLResponse)
-async def get_devices_partial(request: Request):
+async def get_devices_partial(
+    request: Request, current_user: User = Depends(get_current_active_user)
+):
     """HTMX partial for the Devices section."""
     async with PostgreSQLDatabase.get_session() as db:
         # 1. Fetch data cleanly through the Service Layer
@@ -92,7 +116,11 @@ async def get_devices_partial(request: Request):
 
 
 @web_router.get("/devices/{device_id}/telemetry", response_class=HTMLResponse)
-async def get_device_telemetry(request: Request, device_id: str):
+async def get_device_telemetry(
+    request: Request,
+    device_id: str,
+    current_user: User = Depends(get_current_active_user),
+):
     """HTMX partial that returns the telemetry table for the modal."""
     async with PostgreSQLDatabase.get_session() as db:
         # Fetch the latest 50 telemetry points for this device
@@ -106,7 +134,9 @@ async def get_device_telemetry(request: Request, device_id: str):
 
 
 @web_router.get("/ota", response_class=HTMLResponse)
-async def get_ota_partial(request: Request):
+async def get_ota_partial(
+    request: Request, current_user: User = Depends(get_current_active_user)
+):
     """Main OTA Dashboard."""
     async with PostgreSQLDatabase.get_session() as db:
         devices = await DeviceService.get_all(db)
@@ -121,7 +151,9 @@ async def get_ota_partial(request: Request):
 
 
 @web_router.get("/ota/jobs", response_class=HTMLResponse)
-async def get_ota_jobs_table(request: Request):
+async def get_ota_jobs_table(
+    request: Request, current_user: User = Depends(get_current_active_user)
+):
     """HTMX Polling Endpoint for the Jobs Table."""
     async with PostgreSQLDatabase.get_session() as db:
         jobs = await OtaService.get_recent_jobs(db)
@@ -133,7 +165,10 @@ async def get_ota_jobs_table(request: Request):
 
 @web_router.post("/ota/canary", response_class=HTMLResponse)
 async def trigger_canary_rollout(
-    request: Request, device_id: str = Form(...), release_id: str = Form(...)
+    request: Request,
+    device_id: str = Form(...),
+    release_id: str = Form(...),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Triggered via HTMX form submission to deploy to a single device."""
     async with PostgreSQLDatabase.get_session() as db:
@@ -151,7 +186,11 @@ async def trigger_canary_rollout(
 
 
 @web_router.post("/ota/fleet", response_class=HTMLResponse)
-async def trigger_fleet_rollout(request: Request, release_id: str = Form(...)):
+async def trigger_fleet_rollout(
+    request: Request,
+    release_id: str = Form(...),
+    current_user: User = Depends(get_current_active_user),
+):
     """Triggered via HTMX form submission to deploy to all eligible devices."""
     async with PostgreSQLDatabase.get_session() as db:
         release = await OtaService.get_release_by_id(db, release_id)
@@ -166,7 +205,9 @@ async def trigger_fleet_rollout(request: Request, release_id: str = Form(...)):
 
 
 @web_router.get("/trips", response_class=HTMLResponse)
-async def get_trips_partial(request: Request):
+async def get_trips_partial(
+    request: Request, current_user: User = Depends(get_current_active_user)
+):
     """HTMX partial for the Trips & Telemetry section."""
     async with PostgreSQLDatabase.get_session() as db:
         # Fetch the active devices to populate the dropdown

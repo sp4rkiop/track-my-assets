@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     MAXMIND_LICENSE_KEY: str | None = None
     GITHUB_TOKEN: str = "change-me"
 
+    # ---- Auth --------------------------------------------------------------
+    SECRET_KEY: str = "change-this-to-a-secure-random-string-in-production"
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    DEFAULT_ADMIN_EMAIL: str = "admin@example.com"
+    DEFAULT_ADMIN_PASSWORD: str = "changeme"
+
     # ---- Database ----------------------------------------------------------
     DB_NAME: str = "postgres"
     DB_USER: str = "postgres"

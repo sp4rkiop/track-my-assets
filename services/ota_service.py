@@ -333,7 +333,7 @@ class OtaService:
 
                         # 5. Insert into Database
                         proxy_url = (
-                            f"{settings.BASE_URL}/api/ota/download/{version_tag}"
+                            f"{settings.BASE_URL}/api/v1/ota/download/{version_tag}"
                         )
                         new_release = OtaRelease(
                             version=version_tag,

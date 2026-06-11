@@ -3,10 +3,10 @@ from fastapi import APIRouter, HTTPException
 from core.database import PostgreSQLDatabase
 from services.trip_service import TripService
 
-trips_router = APIRouter(prefix="/api", tags=["Trips"])
+router = APIRouter()
 
 
-@trips_router.get("/devices/{device_id}/trips")
+@router.get("/devices/{device_id}/trips")
 async def get_device_trips(device_id: uuid.UUID, limit: int = 20):
     """
     Returns a list of segmented trips for a specific device.
@@ -16,7 +16,7 @@ async def get_device_trips(device_id: uuid.UUID, limit: int = 20):
         return {"device_id": str(device_id), "trips": trips}
 
 
-@trips_router.get("/devices/{device_id}/trips/{trip_group_id}/route")
+@router.get("/devices/{device_id}/trips/{trip_group_id}/route")
 async def get_trip_route(device_id: uuid.UUID, trip_group_id: int):
     """
     Fetches the exact array of coordinates for a specific trip to draw the polyline.

@@ -1,17 +1,22 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from api.v1 import devices, health, ota, telemetry
-from api.v1 import ipinfo
-from api.v1.trips import trips_router
+from api.v1 import auth, devices, health, ota, telemetry, trips, ipinfo
 from core.config import settings
 from core.database import PostgreSQLDatabase
+from core.deps import (
+    RequiresPasswordChangeException,
+    WebAuthException,
+    get_current_user,
+)
 from core.middleware import RequestIdMiddleware
 from core.mqtt_client import MQTTService
 from core.redis_cache import RedisCache
+from core.security import seed_default_admin
 from services.geoip_service import close_readers, load_readers
 from services.ota_service import OtaService
 from services.updater_service import scheduled_db_update
@@ -25,6 +30,7 @@ async def lifespan(app: FastAPI):
     await PostgreSQLDatabase.initialize()
     await MQTTService.initialize()
     await MQTTService.start_listening()
+    await seed_default_admin()
 
     # # Load previously downloaded files on startup if they exist
     # await load_readers()
@@ -41,7 +47,7 @@ async def lifespan(app: FastAPI):
     # )
 
     # Run the GitHub sync immediately on boot
-    # scheduler.add_job(OtaService.sync_github_releases, "date")
+    scheduler.add_job(OtaService.sync_github_releases, "date")
 
     # And then schedule it to run every 15 minutes
     scheduler.add_job(OtaService.sync_github_releases, "interval", minutes=15)
@@ -69,6 +75,20 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+
+# Exception handler to redirect unauthenticated web users
+@app.exception_handler(WebAuthException)
+async def web_auth_exception_handler(request: Request, exc: WebAuthException):
+    return RedirectResponse(url="/web/login", status_code=303)
+
+
+@app.exception_handler(RequiresPasswordChangeException)
+async def requires_password_change_handler(
+    request: Request, exc: RequiresPasswordChangeException
+):
+    return RedirectResponse(url="/web/setup-password", status_code=303)
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -79,11 +99,27 @@ app.add_middleware(
 app.add_middleware(RequestIdMiddleware)
 
 # app.include_router(ipinfo.router, prefix="/api/v1/ipinfo", tags=["Ip-Info"])
-app.include_router(devices.router, prefix="/api/v1/devices", tags=["Devices"])
-app.include_router(telemetry.router, prefix="/api/v1/telemetry", tags=["Telemetry"])
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["Auth"])
+app.include_router(
+    devices.router,
+    prefix="/api/v1/devices",
+    tags=["Devices"],
+    dependencies=[Depends(get_current_user)],
+)
+app.include_router(
+    telemetry.router,
+    prefix="/api/v1/telemetry",
+    tags=["Telemetry"],
+    dependencies=[Depends(get_current_user)],
+)
 app.include_router(ota.router, prefix="/api/v1/ota", tags=["OTA Updates"])
 app.include_router(health.router, tags=["Diagnostics"])
-app.include_router(trips_router)
+app.include_router(
+    trips.router,
+    prefix="/api/v1/trips",
+    tags=["Trips"],
+    dependencies=[Depends(get_current_user)],
+)
 app.include_router(web_router)
 app.mount("/static", StaticFiles(directory="web/static"), name="static")
 

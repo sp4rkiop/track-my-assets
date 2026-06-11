@@ -167,7 +167,7 @@
         if (!currentDeviceId) return;
 
         try {
-            const response = await fetch(`/api/devices/${currentDeviceId}/trips?limit=20`);
+            const response = await fetch(`/api/v1/trips/devices/${currentDeviceId}/trips?limit=20`);
             if (!response.ok) throw new Error("Failed to fetch trips");
 
             const data = await response.json();
@@ -230,7 +230,7 @@
         loader.classList.remove('hidden');
 
         try {
-            const response = await fetch(`/api/devices/${currentDeviceId}/trips/${tripGroupId}/route`);
+            const response = await fetch(`/api/v1/trips/devices/${currentDeviceId}/trips/${tripGroupId}/route`);
             const data = await response.json();
 
             tripRouteLayerGroup.clearLayers();

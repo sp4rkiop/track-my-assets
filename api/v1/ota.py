@@ -3,8 +3,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.responses import FileResponse
-from core.deps import get_db
+from core.deps import get_current_user, get_db
 from core.mqtt_client import MQTTService
+from models.user import User
 from schemas.tracker import (
     OtaReleaseCreate,
     OtaReleaseRead,
@@ -20,7 +21,9 @@ router = APIRouter()
 
 @router.post("/releases", response_model=OtaReleaseRead)
 async def create_ota_release(
-    release: OtaReleaseCreate, db: AsyncSession = Depends(get_db)
+    release: OtaReleaseCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     existing = await OtaService.get_release_by_version(db, release.version)
     if existing:
@@ -29,7 +32,11 @@ async def create_ota_release(
 
 
 @router.post("/jobs", response_model=OtaJobRead)
-async def create_ota_job(job_req: OtaJobCreate, db: AsyncSession = Depends(get_db)):
+async def create_ota_job(
+    job_req: OtaJobCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     # 1. Validate Device & Release
     device = await DeviceService.get_by_imei(db, job_req.imei)
     if not device:
@@ -65,7 +72,11 @@ async def create_ota_job(job_req: OtaJobCreate, db: AsyncSession = Depends(get_d
 
 
 @router.post("/releases/{release_id}/rollout", response_model=OtaRolloutResponse)
-async def trigger_fleet_rollout(release_id: UUID, db: AsyncSession = Depends(get_db)):
+async def trigger_fleet_rollout(
+    release_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """
     Triggers a bulk OTA update for all active devices that meet the firmware requirements.
     """
