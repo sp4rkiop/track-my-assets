@@ -366,9 +366,11 @@
             const rawPoints = data.path.map(pt => L.latLng(pt.lat, pt.lng));
             if (rawPoints.length === 0) throw new Error("No path data");
 
-            L.polyline(rawPoints, { color: '#f59e0b', weight: 16, opacity: 0.2, lineCap: 'round', lineJoin: 'round', className: 'cursor-pointer' }).addTo(tripRouteLayerGroup);
+            // Changed path glow to Cyan-500 (#06b6d4)
+            L.polyline(rawPoints, { color: '#06b6d4', weight: 16, opacity: 0.2, lineCap: 'round', lineJoin: 'round', className: 'cursor-pointer' }).addTo(tripRouteLayerGroup);
 
-            const coreLine = L.polyline(rawPoints, { color: '#fbbf24', weight: 4, opacity: 1.0, lineCap: 'round', lineJoin: 'round', className: 'cursor-pointer' }).addTo(tripRouteLayerGroup);
+            // Changed path core to Cyan-400 (#22d3ee)
+            const coreLine = L.polyline(rawPoints, { color: '#22d3ee', weight: 4, opacity: 1.0, lineCap: 'round', lineJoin: 'round', className: 'cursor-pointer' }).addTo(tripRouteLayerGroup);
 
             const tooltipConfig = { sticky: true, className: "font-mono-data text-xs bg-neutral-900 text-neutral-200 border-neutral-700" };
             coreLine.bindTooltip("Click to copy exact coordinate", tooltipConfig);
@@ -388,14 +390,27 @@
 
             coreLine.on('click', handleLineClick);
 
+            // Generator for Custom Pin Point SVGs
+            const pinIcon = (color) => L.divIcon({
+                className: 'bg-transparent cursor-pointer',
+                html: `<svg viewBox="0 0 24 24" width="32" height="32" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0px 3px 3px rgba(0,0,0,0.5));">
+                        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" fill="${color}" stroke="#ffffff" stroke-width="1.5"/>
+                        <circle cx="12" cy="9" r="3.5" fill="#ffffff"/>
+                       </svg>`,
+                iconSize: [32, 32],
+                iconAnchor: [16, 32],
+                tooltipAnchor: [0, -32]
+            });
+
             const startPt = rawPoints[0];
             const endPt = rawPoints[rawPoints.length - 1];
 
-            const startMarker = L.circleMarker(startPt, { radius: 8, fillColor: '#10b981', color: '#059669', weight: 4, fillOpacity: 1, className: 'cursor-pointer' }).addTo(tripRouteLayerGroup);
+            // Replaced Circle Markers with Custom Pins (Green & Red)
+            const startMarker = L.marker(startPt, { icon: pinIcon('#10b981') }).addTo(tripRouteLayerGroup);
             startMarker.bindTooltip("Start Point (Click to copy)", { direction: 'top', className: "font-mono-data text-xs" });
             startMarker.on('click', () => copyCoordinate(startPt.lat, startPt.lng));
 
-            const endMarker = L.circleMarker(endPt, { radius: 8, fillColor: '#ef4444', color: '#b91c1c', weight: 4, fillOpacity: 1, className: 'cursor-pointer' }).addTo(tripRouteLayerGroup);
+            const endMarker = L.marker(endPt, { icon: pinIcon('#ef4444') }).addTo(tripRouteLayerGroup);
             endMarker.bindTooltip("End Point (Click to copy)", { direction: 'top', className: "font-mono-data text-xs" });
             endMarker.on('click', () => copyCoordinate(endPt.lat, endPt.lng));
 

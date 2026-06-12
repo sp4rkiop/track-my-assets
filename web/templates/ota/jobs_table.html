@@ -8,7 +8,7 @@
                 <th scope="col" class="px-6 py-3.5 font-medium">Target Version</th>
                 <th scope="col" class="px-6 py-3.5 font-medium">Status</th>
                 <th scope="col" class="px-6 py-3.5 font-medium text-right">Triggered</th>
-                <th scope="col" class="px-6 py-3.5 font-medium text-right">Reported At</th>
+                <th scope="col" class="px-6 py-3.5 font-medium text-right">Last Seen</th>
                 <th scope="col" class="px-6 py-3.5 font-medium text-center">Action</th>
             </tr>
         </thead>
@@ -25,19 +25,19 @@
                     {% if job.status == 'success' %}
                     <span
                         class="inline-flex items-center text-xs font-medium text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20">
-                        ● Verified
+                        ● Completed
                     </span>
 
                     {% elif job.status == 'downloading' %}
                     <span
                         class="inline-flex items-center text-xs font-medium text-blue-400 bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">
-                        ↓ Downloading .bin
+                        ↓ Downloading
                     </span>
 
                     {% elif job.status == 'queued' %}
                     <span
                         class="inline-flex items-center text-xs font-medium text-purple-400 bg-purple-500/10 px-2 py-1 rounded border border-purple-500/20">
-                        ⏸ Queued (Waiting for Park)
+                        ⏸ Queued
                     </span>
 
                     {% elif job.status == 'pending' or job.status == 'sent' %}
