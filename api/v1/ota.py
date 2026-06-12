@@ -99,7 +99,7 @@ async def trigger_fleet_rollout(
         mqtt_commands_sent=stats["mqtt"],
     )
 
-
+@router.head("/download/{version}")
 @router.get("/download/{version}")
 async def download_firmware(version: str):
     """
