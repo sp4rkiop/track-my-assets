@@ -1,7 +1,11 @@
+{% extends "base.html" if not request.headers.get('hx-request') else "partial.html" %}
+
+{% block content %}
 <div class="fade-in space-y-6">
     <div>
         <h2 class="text-2xl font-bold text-neutral-100">OTA Fleet Management</h2>
-        <p class="text-sm text-neutral-400 mt-1">Deploy firmware updates securely via the MQTT proxy.</p>
+        <p class="text-sm text-neutral-400 mt-1 hidden sm:block">Deploy firmware updates securely via the MQTT proxy.
+        </p>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -83,3 +87,4 @@
         </div>
     </div>
 </div>
+{% endblock %}

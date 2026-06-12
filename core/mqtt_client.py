@@ -153,7 +153,9 @@ class MQTTService:
                         select(OtaJob)
                         .where(
                             OtaJob.device_id == device.id,
-                            OtaJob.status.in_(["pending", "sent", "downloading"]),
+                            OtaJob.status.in_(
+                                ["pending", "sent", "queued", "downloading"]
+                            ),
                         )
                         .order_by(OtaJob.created_at.desc())
                         .limit(1)
@@ -163,8 +165,11 @@ class MQTTService:
 
                     if active_job:
                         active_job.status = ota_status
-                        if ota_status in ["success", "failed"]:
+
+                        # Catch "success" or ANY of the new "failed_..." strings
+                        if ota_status == "success" or ota_status.startswith("failed"):
                             active_job.completed_at = datetime.now(timezone.utc)
+
                         logger.info(
                             f"Updated OTA Job {active_job.id} for {imei} to {ota_status}"
                         )

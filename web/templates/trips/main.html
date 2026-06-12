@@ -1,3 +1,6 @@
+{% extends "base.html" if not request.headers.get('hx-request') else "partial.html" %}
+
+{% block content %}
 <style>
     /* Inverts the map to dark mode, but rotates the hue 180 degrees 
        so blue water stays blue, green parks stay green, and red roads stay red. */
@@ -5,7 +8,6 @@
         filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
     }
 </style>
-
 <div
     class="fade-in flex flex-col-reverse lg:flex-row w-full h-[calc(100dvh-60px)] lg:h-screen relative overflow-hidden bg-neutral-950">
 
@@ -70,7 +72,6 @@
     </div>
 
 </div>
-
 <script>
     // --- 0. UI Full Bleed Layout Override ---
     (function () {
@@ -161,7 +162,7 @@
 
         tripMap = L.map('map', {
             zoomControl: false,
-            layers: [!isDark ? osmDarkRichLayer : osmLightLayer]
+            layers: [isDark ? osmDarkRichLayer : osmLightLayer]
         }).setView([defaultCenter.lat, defaultCenter.lng], defaultCenter.zoom);
 
         L.control.zoom({ position: 'bottomright' }).addTo(tripMap);
@@ -417,3 +418,5 @@
         if (currentDeviceId) loadTrips();
     });
 </script>
+
+{% endblock %}

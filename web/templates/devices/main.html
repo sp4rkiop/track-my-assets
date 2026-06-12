@@ -1,10 +1,14 @@
+{% extends "base.html" if not request.headers.get('hx-request') else "partial.html" %}
+
+{% block content %}
 <div id="device-container" class="fade-in space-y-6" hx-get="/web/devices"
     hx-trigger="every 15s [!window.telemetryModalOpen && !window.editModalOpen]" hx-swap="outerHTML">
 
     <div class="flex justify-between items-end">
         <div>
             <h2 class="text-2xl font-bold text-neutral-100">Hardware Nodes</h2>
-            <p class="text-sm text-neutral-400 mt-1">Live status of registered tracking units. Auto-updates every 15s.
+            <p class="text-sm text-neutral-400 mt-1 hidden sm:block">Live status of registered tracking units.
+                Auto-updates every 15s.
             </p>
         </div>
         <div
@@ -265,3 +269,4 @@
         });
     </script>
 </div>
+{% endblock %}

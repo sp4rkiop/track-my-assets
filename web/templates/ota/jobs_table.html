@@ -4,9 +4,11 @@
         <thead class="bg-neutral-950/40 text-xs uppercase text-neutral-500 border-b border-neutral-800 font-mono-data">
             <tr>
                 <th scope="col" class="px-6 py-3.5 font-medium">Device Target</th>
+                <th scope="col" class="px-6 py-3.5 font-medium">Running Version</th>
                 <th scope="col" class="px-6 py-3.5 font-medium">Target Version</th>
                 <th scope="col" class="px-6 py-3.5 font-medium">Status</th>
                 <th scope="col" class="px-6 py-3.5 font-medium text-right">Triggered</th>
+                <th scope="col" class="px-6 py-3.5 font-medium text-right">Reported At</th>
                 <th scope="col" class="px-6 py-3.5 font-medium text-center">Action</th>
             </tr>
         </thead>
@@ -16,28 +18,59 @@
             {% for job in jobs %}
             <tr class="hover:bg-neutral-800/10 transition-colors group">
                 <td class="px-6 py-4 font-medium text-neutral-200">{{ job.device.name }}</td>
+                <td class="px-6 py-4 text-amber-500 text-xs font-mono-data">{{ job.device.firmware_version or 'Unknown'
+                    }}</td>
                 <td class="px-6 py-4 text-amber-500 text-xs font-mono-data">{{ job.release.version }}</td>
                 <td class="px-6 py-4">
                     {% if job.status == 'success' %}
                     <span
-                        class="inline-flex items-center text-xs font-medium text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20">●
-                        Verified</span>
+                        class="inline-flex items-center text-xs font-medium text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20">
+                        ● Verified
+                    </span>
+
                     {% elif job.status == 'downloading' %}
                     <span
-                        class="inline-flex items-center text-xs font-medium text-blue-400 bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">↓
-                        Downloading .bin</span>
+                        class="inline-flex items-center text-xs font-medium text-blue-400 bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">
+                        ↓ Downloading .bin
+                    </span>
+
+                    {% elif job.status == 'queued' %}
+                    <span
+                        class="inline-flex items-center text-xs font-medium text-purple-400 bg-purple-500/10 px-2 py-1 rounded border border-purple-500/20">
+                        ⏸ Queued (Waiting for Park)
+                    </span>
+
                     {% elif job.status == 'pending' or job.status == 'sent' %}
                     <span
-                        class="inline-flex items-center text-xs font-medium text-amber-400 bg-amber-500/10 px-2 py-1 rounded border border-amber-500/20">Command
-                        Sent</span>
+                        class="inline-flex items-center text-xs font-medium text-amber-400 bg-amber-500/10 px-2 py-1 rounded border border-amber-500/20">
+                        <svg class="w-3 h-3 mr-1.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+                            </circle>
+                            <path class="opacity-75" fill="currentColor"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                            </path>
+                        </svg>
+                        Command Sent
+                    </span>
+
                     {% else %}
                     <span
-                        class="inline-flex items-center text-xs font-medium text-red-400 bg-red-500/10 px-2 py-1 rounded border border-red-500/20">{{
-                        job.status | title }}</span>
+                        class="inline-flex items-center text-xs font-medium text-red-400 bg-red-500/10 px-2 py-1 rounded border border-red-500/20">
+                        ✗ {{ job.status | replace('_', ' ') | title }}
+                    </span>
                     {% endif %}
                 </td>
                 <td class="px-6 py-4 text-right text-neutral-500 text-xs font-mono-data">
                     <span data-utc="{{ job.created_at.isoformat() }}"></span>
+                </td>
+                <td class="px-6 py-4 text-right text-neutral-500 text-xs font-mono-data">
+                    <span>
+                        {% if job.device.last_seen %}
+                        <span data-utc="{{ job.device.last_seen.isoformat() }}"></span>
+                        {% else %}
+                        No data yet
+                        {% endif %}
+                    </span>
                 </td>
                 <td class="px-6 py-4 text-center">
                     <button hx-delete="/web/ota/jobs/{{ job.id }}"

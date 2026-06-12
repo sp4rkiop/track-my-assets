@@ -109,7 +109,11 @@ async def get_devices_partial(
     return templates.TemplateResponse(
         request=request,
         name="devices/main.html",
-        context={"active_page": "devices", "devices": device_data},
+        context={
+            "active_page": "devices",
+            "devices": device_data,
+            "current_user": current_user,
+        },
     )
 
 
@@ -179,7 +183,12 @@ async def get_ota_partial(
     return templates.TemplateResponse(
         request=request,
         name="ota/main.html",
-        context={"active_page": "ota", "devices": devices, "releases": releases},
+        context={
+            "active_page": "ota",
+            "devices": devices,
+            "releases": releases,
+            "current_user": current_user,
+        },
     )
 
 
@@ -267,5 +276,9 @@ async def get_trips_partial(
     return templates.TemplateResponse(
         request=request,
         name="trips/main.html",
-        context={"active_page": "trips", "devices": devices},
+        context={
+            "active_page": "trips",
+            "devices": devices,
+            "current_user": current_user,
+        },
     )
