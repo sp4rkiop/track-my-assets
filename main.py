@@ -47,10 +47,10 @@ async def lifespan(app: FastAPI):
     # )
 
     # Run the GitHub sync immediately on boot
-    scheduler.add_job(OtaService.sync_github_releases, "date")
+    # scheduler.add_job(OtaService.sync_github_releases, "date")
 
-    # And then schedule it to run every 15 minutes
-    scheduler.add_job(OtaService.sync_github_releases, "interval", minutes=15)
+    # # And then schedule it to run every 15 minutes
+    # scheduler.add_job(OtaService.sync_github_releases, "interval", minutes=15)
     # Run cache cleanup once every 24 hours
     scheduler.add_job(OtaService.cleanup_old_cache_files, "interval", hours=24)
 

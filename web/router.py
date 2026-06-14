@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 import pathlib
 
@@ -168,6 +168,52 @@ async def delete_device_node(
         await DeviceService.delete_device(db, device_id)
 
     return await get_devices_partial(request)
+
+
+@web_router.get("/live", response_class=HTMLResponse)
+async def get_live_fleet_page(
+    request: Request, current_user: User = Depends(get_current_active_user)
+):
+    """Renders the full-screen live radar tracking view."""
+    return templates.TemplateResponse(
+        request=request,
+        name="live/main.html",
+        context={"active_page": "live", "current_user": current_user},
+    )
+
+
+@web_router.get("/live/data")
+async def get_live_fleet_data(
+    request: Request, current_user: User = Depends(get_current_active_user)
+):
+    """Lightweight JSON endpoint to poll live fleet coordinates."""
+    async with PostgreSQLDatabase.get_session() as db:
+        devices = await DeviceService.get_all(db)
+        now = datetime.now(timezone.utc)
+        payload = []
+
+        for d in devices:
+            # Fetch only the absolute latest payload for each device
+            telemetry = await TelemetryService.get_history(
+                db, str(d.id), skip=0, limit=1
+            )
+            is_online = bool(d.last_seen and (now - d.last_seen) < timedelta(minutes=5))
+
+            if telemetry and telemetry[0].latitude and telemetry[0].longitude:
+                payload.append(
+                    {
+                        "id": str(d.id),
+                        "name": d.name,
+                        "imei": d.imei[-6:],
+                        "is_online": is_online,
+                        "lat": float(telemetry[0].latitude),
+                        "lng": float(telemetry[0].longitude),
+                        "speed": float(telemetry[0].speed_kmh or 0),
+                        "last_seen": d.last_seen.isoformat() if d.last_seen else None,
+                    }
+                )
+
+    return JSONResponse(content={"fleet": payload})
 
 
 @web_router.get("/ota", response_class=HTMLResponse)

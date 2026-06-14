@@ -1,0 +1,291 @@
+{% extends "base.html" if not request.headers.get('hx-request') else "partial.html" %}
+
+{% block content %}
+<style>
+    .rich-dark-map-filter {
+        filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
+    }
+
+    /* CSS Pulse Animation for Location Dots */
+    @keyframes ping-slow {
+
+        75%,
+        100% {
+            transform: scale(2.5);
+            opacity: 0;
+        }
+    }
+
+    .animate-ping-slow {
+        animation: ping-slow 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+    }
+
+    /* Override default Leaflet tooltip styling to allow pure Tailwind design */
+    .fleet-label-tooltip {
+        background: transparent;
+        border: none;
+        box-shadow: none;
+        padding: 0;
+    }
+
+    .fleet-label-tooltip::before {
+        display: none !important;
+        /* Hides the default white tooltip arrow */
+    }
+</style>
+
+<div class="fade-in w-full h-[calc(100dvh-60px)] lg:h-screen relative overflow-hidden bg-neutral-950">
+
+    <div
+        class="absolute top-4 left-4 lg:top-6 lg:left-6 z-[400] w-64 bg-neutral-900/80 backdrop-blur-md border border-neutral-800 rounded-xl shadow-2xl overflow-hidden drop-shadow-xl transition-all">
+        <div class="p-4 border-b border-neutral-800 bg-neutral-950/50 flex justify-between items-center">
+            <h2 class="text-sm font-bold text-neutral-100 uppercase tracking-widest font-mono-data text-amber-500">Fleet
+                Radar</h2>
+            <div class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" title="Live Sync Active"></div>
+        </div>
+        <div class="p-4 flex gap-4">
+            <div class="flex-1">
+                <div class="text-[10px] text-neutral-500 uppercase tracking-wider mb-1">Total Assets</div>
+                <div class="text-2xl font-bold text-neutral-200 font-mono-data" id="stat-total">-</div>
+            </div>
+            <div class="w-px bg-neutral-800"></div>
+            <div class="flex-1">
+                <div class="text-[10px] text-neutral-500 uppercase tracking-wider mb-1">Online</div>
+                <div class="text-2xl font-bold text-emerald-400 font-mono-data" id="stat-online">-</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="live-map" class="w-full h-full z-0"></div>
+</div>
+
+<script>
+    // --- 0. UI Full Bleed Layout Override ---
+    (function () {
+        const main = document.getElementById('main-content');
+        if (main && !main.classList.contains('max-w-full')) {
+            main.classList.remove('max-w-7xl', 'p-4', 'md:p-8');
+            main.classList.add('max-w-full', 'p-0');
+
+            const cleanup = (e) => {
+                if (e.detail.target.id === 'main-content') {
+                    main.classList.add('max-w-7xl', 'p-4', 'md:p-8');
+                    main.classList.remove('max-w-full', 'p-0');
+                    document.body.removeEventListener('htmx:beforeSwap', cleanup);
+                }
+            };
+            document.body.addEventListener('htmx:beforeSwap', cleanup);
+        }
+    })();
+
+    // --- 1. Map Layers & Base Init ---
+    var radarMap;
+    var themeObserver;
+    var liveInterval;
+    var userGeoWatch;
+    var fleetMarkers = {};
+    var isFirstLoad = true;
+
+    var cartoLightLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; CARTO', subdomains: 'abcd', maxZoom: 20
+    });
+    var cartoDarkMutedLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; CARTO', subdomains: 'abcd', maxZoom: 20
+    });
+
+    var osmLightLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap', maxZoom: 19 });
+    var esriStreetLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles &copy; Esri', maxZoom: 19 });
+    var topoLayer = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenTopoMap', maxZoom: 17 });
+
+    var osmDarkRichLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap', maxZoom: 19, className: 'rich-dark-map-filter' });
+    var esriStreetDarkRichLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles &copy; Esri', maxZoom: 19, className: 'rich-dark-map-filter' });
+    var satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles &copy; Esri', maxZoom: 19 });
+
+    function getMapCenterByTimezone() {
+        const tz = window.userTimezone || Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+        const regions = {
+            'Asia/Kolkata': { lat: 22.9734, lng: 78.6569, zoom: 5 },
+            'America/': { lat: 39.8283, lng: -98.5795, zoom: 4 },
+            'Europe/': { lat: 54.5260, lng: 15.2551, zoom: 4 },
+            'Australia/': { lat: -25.2744, lng: 133.7751, zoom: 4 },
+            'Africa/': { lat: -8.7832, lng: 34.5085, zoom: 3 },
+        };
+        if (tz === 'Asia/Kolkata') return regions['Asia/Kolkata'];
+        for (const [prefix, config] of Object.entries(regions)) {
+            if (tz.startsWith(prefix)) return config;
+        }
+        return { lat: 0, lng: 0, zoom: 2 };
+    }
+
+    function initRadarMap() {
+        if (radarMap !== undefined && radarMap !== null) radarMap.remove();
+
+        const isDark = document.documentElement.classList.contains('dark');
+        const defaultCenter = getMapCenterByTimezone();
+
+        radarMap = L.map('live-map', {
+            zoomControl: false,
+            layers: [isDark ? osmDarkRichLayer : osmLightLayer]
+        }).setView([defaultCenter.lat, defaultCenter.lng], defaultCenter.zoom);
+
+        L.control.zoom({ position: 'bottomright' }).addTo(radarMap);
+
+        const baseMaps = {
+            "CartoDB Muted (Dark Mode)": cartoDarkMutedLayer,
+            "OSM Rich (Dark Mode)": osmDarkRichLayer,
+            "Esri Street (Dark Mode)": esriStreetDarkRichLayer,
+            "CartoDB Positron (Light Mode)": cartoLightLayer,
+            "Esri Street (Light Mode)": esriStreetLayer,
+            "OSM Standard (Light Mode)": osmLightLayer,
+            "OpenTopoMap (Trails/Dirt)": topoLayer,
+            "Esri Satellite Vision": satelliteLayer
+        };
+        L.control.layers(baseMaps, null, { position: 'topright' }).addTo(radarMap);
+
+        setTimeout(() => radarMap.invalidateSize(), 50);
+
+        if (themeObserver) themeObserver.disconnect();
+        themeObserver = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                if (mutation.attributeName === 'class') {
+                    const darkActive = document.documentElement.classList.contains('dark');
+                    if (darkActive) {
+                        if (radarMap.hasLayer(osmLightLayer)) { radarMap.removeLayer(osmLightLayer); radarMap.addLayer(osmDarkRichLayer); }
+                        if (radarMap.hasLayer(esriStreetLayer)) { radarMap.removeLayer(esriStreetLayer); radarMap.addLayer(esriStreetDarkRichLayer); }
+                        if (radarMap.hasLayer(cartoLightLayer)) { radarMap.removeLayer(cartoLightLayer); radarMap.addLayer(cartoDarkMutedLayer); }
+                    } else {
+                        if (radarMap.hasLayer(osmDarkRichLayer)) { radarMap.removeLayer(osmDarkRichLayer); radarMap.addLayer(osmLightLayer); }
+                        if (radarMap.hasLayer(esriStreetDarkRichLayer)) { radarMap.removeLayer(esriStreetDarkRichLayer); radarMap.addLayer(esriStreetLayer); }
+                        if (radarMap.hasLayer(cartoDarkMutedLayer)) { radarMap.removeLayer(cartoDarkMutedLayer); radarMap.addLayer(cartoLightLayer); }
+                    }
+                }
+            });
+        });
+        themeObserver.observe(document.documentElement, { attributes: true });
+    }
+
+    // --- 2. Pin Generators ---
+
+    // Dynamic asset dot: Green pulsing if online, static grey if offline
+    const deviceIcon = (isOnline) => L.divIcon({
+        className: 'bg-transparent',
+        html: `<div class="relative flex h-6 w-6 items-center justify-center">
+                   ${isOnline ? '<span class="animate-ping-slow absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>' : ''}
+                   <span class="relative inline-flex rounded-full h-3 w-3 ${isOnline ? 'bg-emerald-500' : 'bg-neutral-500'} border-2 border-white shadow-md transition-colors duration-300"></span>
+               </div>`,
+        iconSize: [24, 24], iconAnchor: [12, 12], tooltipAnchor: [12, 0]
+    });
+
+    // Browser Location Dot: Blue pulsing
+    const userIcon = L.divIcon({
+        className: 'bg-transparent',
+        html: `<div class="relative flex h-6 w-6 items-center justify-center">
+                   <span class="animate-ping-slow absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                   <span class="relative inline-flex rounded-full h-3 w-3 bg-blue-500 border-2 border-white shadow-md transition-colors duration-300"></span>
+               </div>`,
+        iconSize: [24, 24], iconAnchor: [12, 12], tooltipAnchor: [12, 0]
+    });
+
+
+    // --- 3. Live Polling Logic ---
+    async function fetchLiveFleet() {
+        try {
+            const response = await fetch('/web/live/data');
+            if (!response.ok) return;
+            const data = await response.json();
+
+            // Update HUD
+            document.getElementById('stat-total').innerText = data.fleet.length;
+            document.getElementById('stat-online').innerText = data.fleet.filter(d => d.is_online).length;
+
+            let bounds = L.latLngBounds();
+
+            data.fleet.forEach(device => {
+                const latlng = [device.lat, device.lng];
+                bounds.extend(latlng);
+
+                // Embedded Tailwind HTML designed to act as a sleek tracking label
+                const tooltipHtml = `
+                    <div class="font-mono-data text-xs bg-neutral-900/80 backdrop-blur-md text-neutral-200 border border-neutral-700/50 shadow-lg rounded-lg p-2.5 pointer-events-none transition-all duration-300">
+                        <div class="flex flex-col min-w-[100px]">
+                            <span class="text-amber-500 font-bold border-b border-neutral-700/50 pb-1 mb-1 truncate">${device.name}</span>
+                            <div class="flex justify-between items-center text-[10px]">
+                                <span>${device.speed.toFixed(0)} km/h</span>
+                                <span class="${device.is_online ? 'text-emerald-400' : 'text-neutral-500'} ml-3 font-semibold tracking-wider">
+                                    ${device.is_online ? '● LIVE' : '● OFF'}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                if (fleetMarkers[device.id]) {
+                    // Smoothly update existing marker position
+                    fleetMarkers[device.id].setLatLng(latlng);
+                    fleetMarkers[device.id].setIcon(deviceIcon(device.is_online));
+                    fleetMarkers[device.id].setTooltipContent(tooltipHtml);
+                } else {
+                    // Spawn new marker
+                    fleetMarkers[device.id] = L.marker(latlng, { icon: deviceIcon(device.is_online) })
+                        // Added permanent: true to lock it open, and the custom class to strip Leaflet's defaults
+                        .bindTooltip(tooltipHtml, { permanent: true, direction: 'right', offset: [10, 0], className: 'fleet-label-tooltip' })
+                        .addTo(radarMap);
+                }
+            });
+
+            // Automatically pan/zoom to fit the fleet ONLY on the very first load
+            if (isFirstLoad && data.fleet.length > 0) {
+                radarMap.fitBounds(bounds, { padding: [80, 80], maxZoom: 14 });
+                isFirstLoad = false;
+            }
+
+        } catch (error) {
+            console.error("Live sync failed", error);
+        }
+    }
+
+
+    // --- 4. Boot & Lifecycle ---
+    initRadarMap();
+    fetchLiveFleet(); // Initial immediate fetch
+
+    // Poll server every 10 seconds for new coordinates
+    liveInterval = setInterval(fetchLiveFleet, 10000);
+
+    // Watch the User's Personal HTML5 Geolocation
+    let userMarker = null;
+    if ('geolocation' in navigator) {
+        userGeoWatch = navigator.geolocation.watchPosition(
+            (pos) => {
+                const latlng = [pos.coords.latitude, pos.coords.longitude];
+
+                const userTooltipHtml = `
+                    <div class="font-mono-data text-xs bg-blue-900/80 backdrop-blur-md text-blue-100 border border-blue-500/50 shadow-lg rounded-lg px-2 py-1 pointer-events-none transition-all duration-300">
+                        <span class="font-bold tracking-wider">YOU</span>
+                    </div>
+                `;
+
+                if (!userMarker) {
+                    userMarker = L.marker(latlng, { icon: userIcon, zIndexOffset: 1000 })
+                        .bindTooltip(userTooltipHtml, { permanent: true, direction: 'right', offset: [10, 0], className: 'fleet-label-tooltip' })
+                        .addTo(radarMap);
+                } else {
+                    userMarker.setLatLng(latlng);
+                }
+            },
+            (err) => console.warn('Browser Geolocation error:', err.message),
+            { enableHighAccuracy: true, maximumAge: 10000, timeout: 30000 }
+        );
+    }
+
+    // Cleanup scripts safely when HTMX destroys the page
+    document.body.addEventListener('htmx:beforeSwap', function cleanupRadar(e) {
+        if (e.detail.target.id === 'main-content') {
+            clearInterval(liveInterval);
+            if (userGeoWatch) navigator.geolocation.clearWatch(userGeoWatch);
+            document.body.removeEventListener('htmx:beforeSwap', cleanupRadar);
+        }
+    });
+</script>
+
+{% endblock %}

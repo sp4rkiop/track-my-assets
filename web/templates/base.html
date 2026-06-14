@@ -76,6 +76,11 @@
                 Device Hub
             </button>
 
+            <button hx-get="/web/live" hx-target="#main-content" hx-push-url="true" data-nav="live"
+                class="w-full flex items-center px-4 py-2.5 text-sm font-medium rounded-lg transition-all {% if active_page == 'live' %} bg-neutral-950 text-amber-500 border border-neutral-800 font-semibold {% else %} text-neutral-400 hover:bg-neutral-800/50 hover:text-neutral-200 {% endif %}">
+                Live Radar
+            </button>
+
             <button hx-get="/web/ota" hx-target="#main-content" hx-push-url="true" data-nav="ota"
                 class="w-full flex items-center px-4 py-2.5 text-sm font-medium rounded-lg transition-all {% if active_page == 'ota' %} bg-neutral-950 text-amber-500 border border-neutral-800 font-semibold {% else %} text-neutral-400 hover:bg-neutral-800/50 hover:text-neutral-200 {% endif %}">
                 OTA Management
@@ -87,15 +92,16 @@
             </button>
         </nav>
 
-<div class="p-4 border-t border-neutral-800 space-y-3 text-xs text-neutral-500 bg-neutral-950/40">
-            <div class="flex items-center justify-between" id="server-health-beacon"
-                hx-get="/api/health" hx-trigger="every 10s" hx-swap="innerHTML">
+        <div class="p-4 border-t border-neutral-800 space-y-3 text-xs text-neutral-500 bg-neutral-950/40">
+            <div class="flex items-center justify-between" id="server-health-beacon" hx-get="/api/health"
+                hx-trigger="every 10s" hx-swap="innerHTML">
                 <span>Node Cluster: Online</span>
                 <div class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></div>
             </div>
 
             <div class="pt-2 border-t border-neutral-800">
-                <label class="block text-[10px] font-semibold text-neutral-600 uppercase tracking-wider mb-1.5">Timezone</label>
+                <label
+                    class="block text-[10px] font-semibold text-neutral-600 uppercase tracking-wider mb-1.5">Timezone</label>
                 <select id="timezone-select" onchange="changeTimezone(this.value)"
                     class="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-neutral-200 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none cursor-pointer">
                     <option value="UTC">UTC (Default)</option>
@@ -114,7 +120,7 @@
                 </select>
             </div>
         </div>
-     </aside>
+    </aside>
 
     <main
         class="flex-1 flex flex-col min-w-0 overflow-y-auto bg-neutral-950 text-neutral-100 transition-colors duration-200"
@@ -204,6 +210,7 @@
             let activeNav = "overview";
 
             if (currentPath.includes("/devices")) activeNav = "devices";
+            else if (currentPath.includes("/live")) activeNav = "live";
             else if (currentPath.includes("/ota")) activeNav = "ota";
             else if (currentPath.includes("/trips")) activeNav = "trips";
 
