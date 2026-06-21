@@ -170,6 +170,18 @@ class MQTTService:
                         if ota_status == "success" or ota_status.startswith("failed"):
                             active_job.completed_at = datetime.now(timezone.utc)
 
+                        # --- THE CLEARING LOGIC ---
+                        # Clear the retained message the moment the device acknowledges it.
+                        if ota_status == "queued" and cls._client is not None:
+                            clear_topic = f"trackers/{imei}/commands"
+                            # Publishing an empty byte string (b"") with retain=True deletes the message
+                            await cls._client.publish(
+                                clear_topic, payload=b"", qos=1, retain=True
+                            )
+                            logger.info(
+                                f"Cleared retained OTA command on {clear_topic}"
+                            )
+
                         logger.info(
                             f"Updated OTA Job {active_job.id} for {imei} to {ota_status}"
                         )
@@ -248,16 +260,24 @@ class MQTTService:
             logger.error(f"Error processing MQTT message: {e}", exc_info=True)
 
     @classmethod
-    async def publish_command(cls, imei: str, payload: dict):
-        """Pushes a command directly to a specific tracker."""
+    async def publish_command(cls, imei: str, payload: dict, retain: bool = False):
+        """Pushes a command to a tracker.
+
+        Set retain=True for commands that must survive the device being
+        offline (e.g. OTA_UPDATE). Retained messages are held by the broker
+        per-topic — independent of the device's session state — so they're
+        delivered the instant the device next subscribes, regardless of
+        whether its MQTT session survived the disconnect.
+        """
         if cls._client is None:
             logger.error("Cannot publish: MQTT client is not initialized.")
             return False
         topic = f"trackers/{imei}/commands"
         try:
-            # QoS 1 ensures the tower holds the message if the bike is in a tunnel
-            await cls._client.publish(topic, payload=json.dumps(payload), qos=1)
-            logger.info(f"Successfully published command to {topic}: {payload}")
+            await cls._client.publish(
+                topic, payload=json.dumps(payload), qos=1, retain=retain
+            )
+            logger.info(f"Published command to {topic} (retain={retain}): {payload}")
             return True
         except Exception as e:
             logger.error(f"Failed to publish to {topic}: {e}")
