@@ -16,12 +16,9 @@
 
         <div class="p-5 border-b border-neutral-800 bg-neutral-900/80 shrink-0">
             <div class="flex items-center justify-between gap-3">
-                <div class="min-w-0">
-                    <h2 class="text-xl font-bold text-neutral-100">Trips</h2>
-                    <p class="text-sm text-neutral-400 mt-1 hidden sm:block">Select a device to visualize the telemetry path.</p>
-                </div>
+                <h2 class="text-xl font-bold text-neutral-100 min-w-0 flex-1 truncate">Trips</h2>
                 <select id="device-select" onchange="changeDevice(this.value)"
-                    class="w-full sm:w-auto sm:max-w-[200px] bg-neutral-950 border border-neutral-700 rounded-lg p-2.5 text-sm text-neutral-200 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none transition-all cursor-pointer shrink-0">
+                    class="min-w-0 max-w-fit bg-neutral-950 border border-neutral-700 rounded-lg p-2.5 text-sm text-neutral-200 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none transition-all cursor-pointer shrink-0 truncate">
                     {% if not devices %}
                     <option value="" disabled selected>No devices found...</option>
                     {% endif %}
@@ -31,6 +28,7 @@
                     {% endfor %}
                 </select>
             </div>
+            <p class="text-sm text-neutral-400 mt-3 hidden sm:block">Select a device to visualize the telemetry path.</p>
         </div>
 
         <div id="trips-list" class="flex-1 overflow-y-auto p-3 space-y-3 relative bg-neutral-900/50">
