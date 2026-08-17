@@ -123,6 +123,11 @@ app.include_router(
 app.include_router(web_router)
 
 
+@app.get("/", response_class=RedirectResponse)
+def root_redirect():
+    return RedirectResponse(url="/web/", status_code=308)
+
+
 @app.get("/health")
 def server_health() -> dict[str, str]:
     return {"status": "ok"}
